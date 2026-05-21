@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Zen Maru Gothic", ui-sans-serif, system-ui, sans-serif;
+  
+  /* Morandi Color Palette */
+  --color-morandi-dust: #E2D1C3;
+  --color-morandi-sage: #B5C0B0;
+  --color-morandi-blue: #9BB7D4;
+  --color-morandi-clay: #A68B8B;
+  --color-morandi-ash: #8E9775;
+  --color-morandi-sand: #D4C2AD;
+  --color-morandi-mist: #F1F1F1;
+  
+  --color-fuji-blue: var(--color-morandi-blue);
+  --color-kyoto-matcha: var(--color-morandi-ash);
+  --color-warm-grey: var(--color-morandi-mist);
+  --color-text-dark: #4A4A4A;
+}
+
+@layer base {
+  body {
+    @apply bg-warm-grey text-text-dark font-sans;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  @apply font-bold mt-4 mb-2;
+}
+
+.markdown-body p {
+  @apply mb-2;
+}
+
+.markdown-body ul {
+  @apply list-disc pl-5 mb-2;
+}
+
+.markdown-body strong {
+  @apply text-orange-600 font-bold;
+}

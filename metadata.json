@@ -1,0 +1,9 @@
+{
+  "name": "京都大阪旅遊工具箱 2026",
+  "description": "一個專為京都大阪自由行設計的全方位旅遊導覽工具，包含行程規劃、記帳匯率、購物清單與行前指南。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

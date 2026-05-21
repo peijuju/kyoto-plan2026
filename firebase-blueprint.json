@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Trip": {
+      "title": "Trip",
+      "description": "Travel itinerary data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "collaborators": { "type": "array", "items": { "type": "string" } },
+        "title": { "type": "string" },
+        "dateRange": { "type": "string" },
+        "data": { "type": "object", "description": "Full ItineraryData object serialized if small, or summary pointers" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "collaborators"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Individual spending record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "tripId": { "type": "string" },
+        "name": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["JPY", "TWD"] },
+        "paymentMethod": { "type": "string", "enum": ["cash", "credit"] },
+        "category": { "type": "string", "enum": ["transport", "food", "hotel", "ticket", "shopping", "other"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["userId", "tripId", "name", "amount", "currency"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/trips/{tripId}": {
+      "schema": "Trip",
+      "description": "Shared travel itineraries"
+    },
+    "/trips/{tripId}/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Expenses associated with a shared trip"
+    }
+  }
+}
