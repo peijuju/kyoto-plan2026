@@ -19,6 +19,7 @@ export interface Spot {
   ticketPrice?: number;
   ticketPriceTwd?: string;
   ticketCurrency?: 'JPY' | 'TWD';
+  cardAccepted?: string;
   story?: string;
   guideText?: string;
   notes?: string;
@@ -60,6 +61,7 @@ export interface Expense {
   paymentMethod: 'cash' | 'credit';
   category: ExpenseCategory;
   notes?: string;
+  images?: string[];
 }
 
 export interface ShoppingItem {
@@ -69,6 +71,8 @@ export interface ShoppingItem {
   remarks: string;
   link?: string;
   completed: boolean;
+  category?: 'pharmacy' | 'gift' | 'supermarket' | 'apparel' | 'grocery' | 'other' | 'muji' | 'gu' | 'uq';
+  convenienceStores?: string[];
 }
 
 export interface PackingItem {
@@ -114,6 +118,7 @@ export interface TransportOrder {
   location?: string;
   url?: string;
   remarks?: string;
+  images?: string[];
 }
 
 export interface ItineraryData {
