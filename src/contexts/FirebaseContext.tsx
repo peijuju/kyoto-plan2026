@@ -81,8 +81,23 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const signIn = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Sign in error', error);
+      if (error?.code === 'auth/unauthorized-domain') {
+        alert(
+          '【Firebase 登入權限授權錯誤】\n\n' +
+          '原因：您目前的網域 (GitHub Pages) 未被加入至該 Firebase 專案的「授權網域」中。\n\n' +
+          '解決步驟：\n' +
+          '1. 由於 AI Studio 連接的預設 Firebase 是開發沙盒，您無法直接管理其控制台。\n' +
+          '2. 若要在您的 GitHub Pages (peijuju.github.io) 正常運作：\n' +
+          '   a. 請自行至 Firebase 官網建立一個您的專案。\n' +
+          '   b. 將您的「firebase-applet-config.json」更新為您的 Firebase 金鑰。\n' +
+          '   c. 前往 Firebase 控制台 -> 進入 Authentication -> Settings -> 「Authorized Domains」列表。\n' +
+          '   d. 手動新增您的網域（例如 `peijuju.github.io`）存檔即可正常使用！'
+        );
+      } else {
+        alert('登入失敗：' + (error?.message || error));
+      }
     }
   };
 
