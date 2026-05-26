@@ -17,6 +17,7 @@ import {
   Cloud, 
   Sun, 
   CloudRain, 
+  CloudSun,
   Camera, 
   Plane, 
   Hotel, 
@@ -49,7 +50,8 @@ import {
   Sunset,
   BookOpen,
   Hourglass,
-  ArrowDown
+  ArrowDown,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -96,8 +98,112 @@ const getAiInstance = (): GoogleGenAI => {
   return new GoogleGenAI({ apiKey });
 };
 
+// Robust helper to parse arbitrary date formats into a comparable timestamp
+const parseTransportDate = (dateStr: string, defaultYear: string = '2026'): number => {
+  if (!dateStr) return 0;
+  let clean = dateStr.replace(/\./g, '/').replace(/-/g, '/').trim();
+  if (clean.includes('/')) {
+    const parts = clean.split('/');
+    if (parts.length === 2) {
+      const mm = parts[0].padStart(2, '0');
+      const dd = parts[1].padStart(2, '0');
+      const d = new Date(`${defaultYear}-${mm}-${dd}`);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
+    } else if (parts.length === 3) {
+      let yyyy = parts[0];
+      let mm = parts[1];
+      let dd = parts[2];
+      // Handles if year is at the end e.g. 06/05/2026
+      if (yyyy.length < 4 && dd.length === 4) {
+        const temp = yyyy;
+        yyyy = dd;
+        dd = temp;
+      }
+      const d = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
+    }
+  }
+  // Fallback to numeric value
+  const numbersOnly = dateStr.replace(/[^0-9]/g, '');
+  if (numbersOnly.length === 4) {
+    return parseInt(defaultYear + numbersOnly, 10) || 0;
+  }
+  return parseInt(numbersOnly, 10) || 0;
+};
+
+// Helper to sort transport orders from earliest to latest (ascending)
+const sortTransportOrdersByDate = (orders: TransportOrder[], defaultYear: string = '2026'): TransportOrder[] => {
+  return [...orders].sort((a, b) => {
+    const tA = parseTransportDate(a.date || '', defaultYear);
+    const tB = parseTransportDate(b.date || '', defaultYear);
+    if (tA === 0 && tB === 0) return 0;
+    if (tA === 0) return 1; // Empty date to bottom
+    if (tB === 0) return -1;
+    
+    if (tA === tB) {
+      const timeA = (a.time || '').replace(/[^0-9]/g, '').padStart(4, '0');
+      const timeB = (b.time || '').replace(/[^0-9]/g, '').padStart(4, '0');
+      return timeA.localeCompare(timeB);
+    }
+    return tA - tB;
+  });
+};
+
+// Helper to sort expenses from newest to oldest (descending)
+const sortExpensesByDateDesc = (expenses: Expense[]): Expense[] => {
+  return [...expenses].sort((a, b) => {
+    const dateA = a.date || '';
+    const dateB = b.date || '';
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return 1; // Empty date to bottom
+    if (!dateB) return -1;
+    
+    // Sort descending (newest to oldest)
+    const dateCompare = dateB.localeCompare(dateA);
+    if (dateCompare === 0) {
+      return b.id.localeCompare(a.id);
+    }
+    return dateCompare;
+  });
+};
+
+const getCityWeatherConfig = (city: string) => {
+  switch (city) {
+    case '京都市':
+      return {
+        ja: '京都市',
+        en: 'Kyoto City',
+        url: 'https://tenki.jp/forecast/6/29/6110/26100/'
+      };
+    case '宇治市':
+      return {
+        ja: '宇治市',
+        en: 'Uji City',
+        url: 'https://tenki.jp/forecast/6/29/6110/26204/'
+      };
+    case '大阪市':
+      return {
+        ja: '大阪市',
+        en: 'Osaka City',
+        url: 'https://tenki.jp/forecast/6/30/6200/27100/'
+      };
+    case '泉佐野市':
+      return {
+        ja: '泉佐野市',
+        en: 'Izumisano City',
+        url: 'https://tenki.jp/forecast/6/30/6200/27213/'
+      };
+    default:
+      return {
+        ja: city || '京都市',
+        en: 'Kyoto Area',
+        url: 'https://tenki.jp/'
+      };
+  }
+};
+
 const INITIAL_DATA: ItineraryData = {
-  title: "2026 日本關西母女之旅",
+  title: "京都之旅 2026",
   year: "2026",
   dateRange: "2026/06/05 – 06/11 (7天6夜)",
   days: [
@@ -120,22 +226,7 @@ const INITIAL_DATA: ItineraryData = {
       id: 'day2',
       date: '06.06 (六)',
       title: 'Day 2',
-      location: '伏見鳥居 ➔ 宇治紫陽花與抹茶',
-      city: '宇治市',
-      spots: [
-        { id: 's6', time: '09:30', location: '伏見稻荷大社', category: 'sightseeing', description: '趁早拍「千本鳥居」，此時光線最美。', travelTimeNext: '30m', stayDuration: '90m', locationJp: '伏見稲荷大社' },
-        { id: 's7', time: '11:00', location: '藤森神社', category: 'sightseeing', description: '季節限定。6月紫陽花祭，是非常適合母女合照的祕境。', travelTimeNext: '30m', stayDuration: '60m', locationJp: '藤森神社' },
-        { id: 's8', time: '12:30', location: '京うどん 三よしや', category: 'food', description: '宇治在地人氣烏龍麵，麵條Q彈適合長輩。', travelTimeNext: '15m', stayDuration: '60m', locationJp: '京うどん 三よしや' },
-        { id: 's9', time: '14:00', location: '平等院', category: 'sightseeing', description: '參觀 10 元硬幣上的鳳凰堂。', travelTimeNext: '15m', stayDuration: '90m', locationJp: '平等院' },
-        { id: 's10', time: '15:30', location: '中村藤吉 (平等院店)', category: 'food', description: '攻略： 一到宇治先去店面抽號碼牌，逛完平等院剛好回來吃。', stayDuration: '60m', locationJp: '中村藤吉 平等院店' },
-      ],
-      weather: { temp: '26°C', condition: '晴', icon: 'sun', rainProb: '10%' }
-    },
-    {
-      id: 'day3',
-      date: '06.07 (日)',
-      title: 'Day 3',
-      location: '侘寂銀閣寺 ➔ 最萌兔子神社 ➔ 夢幻豬排',
+      location: '銀閣寺、岡崎神社',
       city: '京都市',
       spots: [
         { id: 's11', time: '10:00', location: '銀閣寺', category: 'sightseeing', description: '欣賞枯山水與銀沙灘，整體氛圍安靜優雅。', travelTimeNext: '40m', stayDuration: '90m', locationJp: '銀閣寺' },
@@ -145,6 +236,22 @@ const INITIAL_DATA: ItineraryData = {
         { id: 's15', time: '18:30', location: '宮川豚衛門', category: 'food', description: '預約攻略： 務必提前在 TableCheck 預約「林SPF熟成豬排」。', stayDuration: '90m', locationJp: '宮川町 豚衛門' },
       ],
       weather: { temp: '25°C', condition: '晴', icon: 'sun', rainProb: '0%' }
+    },
+    {
+      id: 'day3',
+      date: '06.07 (日)',
+      title: 'Day 3',
+      location: '御金神社、北野天滿宮',
+      city: '京都市',
+      spots: [
+        { id: 's200', time: '09:30', location: '御金神社', category: 'sightseeing', description: '全日本最閃耀的求財之境，金黃色鳥居與特製黃金護身符、福財布必拜。', travelTimeNext: '40m', stayDuration: '60m', locationJp: '御金神社' },
+        { id: 's201', time: '11:00', location: '北野天滿宮', category: 'sightseeing', description: '求學業與智慧，主祭學問之神菅原道真，庭院精美。', travelTimeNext: '30m', stayDuration: '90m', locationJp: '北野天満宮' },
+        { id: 's20', time: '13:00', location: '錦市場', category: 'food', description: '體驗「京都廚房」。攻略： 買三木雞卵的玉子燒分食。', travelTimeNext: '30m', stayDuration: '90m', locationJp: '錦市場' },
+        { id: 's21', time: '14:30', location: '錦市場小吃巡禮', category: 'food', description: '豆乳甜甜圈、漬物串、手作章魚等小吃。', travelTimeNext: '60m', stayDuration: '60m' },
+        { id: 's22', time: '16:00', location: '鴨川散策', category: 'sightseeing', description: '6月若氣候涼爽，可去跳「烏龜石」漫步。', travelTimeNext: '40m', stayDuration: '60m', locationJp: '鴨川' },
+        { id: 's24', time: '18:30', location: '高木咖啡', category: 'food', description: '體驗昭和風情西式晚餐與香醇復古手工咖啡。', stayDuration: '90m', locationJp: '高木珈琲店' },
+      ],
+      weather: { temp: '24°C', condition: '多雲', icon: 'cloud', rainProb: '20%' }
     },
     {
       id: 'day4',
@@ -164,33 +271,33 @@ const INITIAL_DATA: ItineraryData = {
       id: 'day5',
       date: '06.09 (二)',
       title: 'Day 5',
-      location: '錦市場巡禮 ➔ 鴨川漫步 ➔ 百貨補貨',
-      city: '京都市',
+      location: '伏見區→往宇治',
+      city: '宇治市',
       spots: [
-        { id: 's20', time: '10:00', location: '錦市場', category: 'food', description: '體驗「京都廚房」。攻略： 買三木雞卵的玉子燒分食。', travelTimeNext: '30m', stayDuration: '90m', locationJp: '錦市場' },
-        { id: 's21', time: '12:00', location: '錦市場小吃巡禮', category: 'food', description: '豆乳甜甜圈、漬物串。', travelTimeNext: '60m', stayDuration: '60m' },
-        { id: 's22', time: '14:30', location: '鴨川散策', category: 'sightseeing', description: '6月若氣候涼爽，可去跳「烏龜石」。', travelTimeNext: '40m', stayDuration: '60m', locationJp: '鴨川' },
-        { id: 's23', time: '16:30', location: '自由時間', category: 'shopping', description: '四條河原町大丸/高島屋百貨最後掃貨。', travelTimeNext: '60m', stayDuration: '120m' },
-        { id: 's24', time: '19:00', location: '高木咖啡', category: 'food', description: '體驗昭和風情西式晚餐。', stayDuration: '90m', locationJp: '高木珈琲店' },
+        { id: 's6', time: '09:30', location: '伏見稻荷大社', category: 'sightseeing', description: '趁早拍「千本鳥居」，此時光線最美。', travelTimeNext: '30m', stayDuration: '90m', locationJp: '伏見稲荷大社' },
+        { id: 's7', time: '11:00', location: '藤森神社', category: 'sightseeing', description: '季節限定。6月紫陽花祭，是非常適合母女合照的祕境。', travelTimeNext: '30m', stayDuration: '60m', locationJp: '藤森神社' },
+        { id: 's8', time: '12:30', location: '京うどん 三よしや', category: 'food', description: '宇治在地人氣烏龍麵，麵條Q彈適合長輩。', travelTimeNext: '15m', stayDuration: '60m', locationJp: '京うどん 三よしや' },
+        { id: 's9', time: '14:00', location: '平等院', category: 'sightseeing', description: '參觀 10 元硬幣上的鳳凰堂。', travelTimeNext: '15m', stayDuration: '90m', locationJp: '平等院' },
+        { id: 's10', time: '15:30', location: '中村藤吉 (平等院店)', category: 'food', description: '攻略： 一到宇治先去店面抽號碼牌，逛完平等院剛好回來吃。', stayDuration: '60m', locationJp: '中村藤吉 平等院店' },
       ],
-      weather: { temp: '22°C', condition: '陰', icon: 'cloud', rainProb: '40%' }
+      weather: { temp: '26°C', condition: '晴', icon: 'sun', rainProb: '10%' }
     },
     {
       id: 'day6',
       date: '06.10 (三)',
       title: 'Day 6',
-      location: '【空手觀光】大阪地標 ➔ 慶功燒肉',
-      city: '大阪市',
+      location: '奈良',
+      city: '奈良市',
       spots: [
-        { id: 's25', time: '09:00', location: '行李運送 (Klook)', category: 'transport', description: '關鍵操作： 飯店櫃檯交付 28 吋大箱。兩手空空去大阪。', travelTimeNext: '60m', stayDuration: '30m' },
-        { id: 's26', time: '11:00', location: '難波八阪神社', category: 'sightseeing', description: '與巨大獅子殿合照（10點前陽光最佳）。', travelTimeNext: '40m', stayDuration: '60m', locationJp: '難波八阪神社' },
-        { id: 's27', time: '12:30', location: '道頓堀巡禮', category: 'food', description: '吃章魚燒、蟹道樂（外帶烤蟹腳）。', travelTimeNext: '30m', stayDuration: '90m', locationJp: '道頓堀' },
-        { id: 's28', time: '14:00', location: '心齋橋購物', category: 'shopping', description: '大丸百貨、藥妝店、UNIQLO 最後衝刺。', travelTimeNext: '60m', stayDuration: '120m', locationJp: '心斎橋筋商店街' },
-        { id: 's29', time: '16:30', location: '前往臨空城', category: 'transport', description: '搭乘南海電鐵（45min）。', travelTimeNext: '60m', stayDuration: '60m' },
-        { id: 's30', time: '18:30', location: '燒肉 One Karubi', category: 'food', description: '預約攻略： 務必預約「點餐式吃到飽」，坐著等美食。', travelTimeNext: '30m', stayDuration: '120m', locationJp: 'ワンカルビ' },
-        { id: 's31', time: '21:00', location: '唐吉訶德', category: 'shopping', description: '飯店旁最後大採買，回 Star Gate Hotel 領取已送達的行李。', stayDuration: '60m', locationJp: 'ドン・キホーテ' },
+        { id: 's25', time: '09:00', location: '行李運送 (Klook)', category: 'transport', description: '關鍵操作： 飯店櫃檯交付 28 吋大箱。兩手空空去奈良。', travelTimeNext: '60m', stayDuration: '30m' },
+        { id: 's26_nara', time: '10:30', location: '奈良公園', category: 'sightseeing', description: '探訪可愛小鹿與購買鹿仙貝餵食，大片草地極度療癒。', travelTimeNext: '20m', stayDuration: '60m', locationJp: '奈良公園' },
+        { id: 's27_todaiji', time: '11:30', location: '東大寺', category: 'sightseeing', description: '參觀宏偉壯觀的大佛殿與歷史青銅大佛。', travelTimeNext: '30m', stayDuration: '60m', locationJp: '東大寺' },
+        { id: 's28_shizuka', time: '12:30', location: '志津香釜飯', category: 'food', description: '奈良高人氣釜飯，使用招牌昆布大骨燉煮，炭香入味。', travelTimeNext: '40m', stayDuration: '70m', locationJp: '志津香' },
+        { id: 's29_kasuga', time: '14:00', location: '春日大社', category: 'sightseeing', description: '漫步被石燈籠環繞的神祕參道，莊嚴肅穆。', travelTimeNext: '60m', stayDuration: '60m', locationJp: '春日大社' },
+        { id: 's30_kintetsu', time: '16:00', location: '搭乘近鐵返回臨空城', category: 'transport', description: '搭乘電車返回大阪臨空城飯店 check-in。', travelTimeNext: '90m', stayDuration: '60m' },
+        { id: 's31_yakiniku', time: '18:30', location: '燒肉 One Karubi', category: 'food', description: '預約攻略： 務必預約臨空城店「點餐式吃到飽」和牛燒肉，坐著等美食。', stayDuration: '120m', locationJp: 'ワンカルビ' }
       ],
-      weather: { temp: '25°C', condition: '晴', icon: 'sun', rainProb: '10%' }
+      weather: { temp: '24°C', condition: '晴', icon: 'sun', rainProb: '10%' }
     },
     {
       id: 'day7',
@@ -269,6 +376,28 @@ const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   shopping: '購物',
   ticket: '門票',
   other: '其他',
+};
+
+const SHOPPING_CATEGORY_LABELS: Record<string, string> = {
+  pharmacy: '藥妝',
+  gift: '伴手禮',
+  supermarket: '超市',
+  apparel: '服飾',
+  muji: '無印',
+  gu: 'GU',
+  uq: 'UQ',
+  other: '其它'
+};
+
+const SHOPPING_CATEGORY_COLORS: Record<string, string> = {
+  pharmacy: 'bg-rose-50 text-rose-600 border-rose-100',
+  gift: 'bg-amber-50 text-amber-600 border-amber-100',
+  supermarket: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+  apparel: 'bg-blue-50 text-blue-600 border-blue-100',
+  muji: 'bg-red-50/80 text-red-600 border-red-100',
+  gu: 'bg-indigo-50/85 text-indigo-600 border-indigo-100',
+  uq: 'bg-sky-50 text-sky-600 border-sky-100',
+  other: 'bg-slate-50 text-slate-600 border-slate-100',
 };
 
 function SortableSpot({ 
@@ -378,20 +507,20 @@ function SortableSpot({
               </div>
             </div>
             {spot.address && (
-              <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
+              <a 
+                href={spot.googleMapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.address || spot.location)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="flex items-center gap-1 text-xs text-slate-400 font-bold hover:text-morandi-clay transition-colors w-fit"
+              >
                 <MapPin size={10} />
-                <p>{spot.address}</p>
-              </div>
+                <p className="underline underline-offset-2">{spot.address}</p>
+              </a>
             )}
             
             {/* Additional Info on Cover */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
-              {spot.phone && (
-                <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                  <Phone size={10} />
-                  <span>{spot.phone}</span>
-                </div>
-              )}
               {spot.openingHours && (
                 <div className="flex items-center gap-1 text-[10px] text-slate-400">
                   <Clock size={10} />
@@ -402,6 +531,12 @@ function SortableSpot({
                 <div className="flex items-center gap-1 text-[10px] text-slate-400">
                   <Hourglass size={10} />
                   <span>{spot.stayDuration}</span>
+                </div>
+              )}
+              {spot.category === 'sightseeing' && (spot.ticketPrice !== undefined && spot.ticketPrice !== null && !isNaN(spot.ticketPrice)) && (
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                  <Ticket size={10} />
+                  <span>門票: {spot.ticketCurrency === 'TWD' ? '$' : '¥'}{spot.ticketPrice}</span>
                 </div>
               )}
             </div>
@@ -477,7 +612,21 @@ function BoardingPass({ flight, onClick, onDelete }: { flight: FlightInfo; onCli
           <Ticket size={14} />
           <span>點擊查看登機證</span>
         </div>
-        <ChevronRight size={16} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
+        <div className="flex items-center gap-2">
+          {flight.ticketUrl && (
+            <a
+              href={flight.ticketUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 bg-white text-morandi-blue border border-slate-100 hover:bg-slate-50 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-xs transition-colors"
+            >
+              <ExternalLink size={10} />
+              <span>機票連結</span>
+            </a>
+          )}
+          <ChevronRight size={16} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
+        </div>
       </div>
     </motion.div>
   );
@@ -539,6 +688,8 @@ export default function App() {
   const [selectedSpot, setSelectedSpot] = useState<{ dayId: string; spot: Spot } | null>(null);
   const [showShoppingModal, setShowShoppingModal] = useState(false);
   const [selectedShoppingItem, setSelectedShoppingItem] = useState<{ id: string; listType: 'shopping' | 'convenience' } | null>(null);
+  const [convenienceStoreFilter, setConvenienceStoreFilter] = useState<'全部' | '7-11' | '全家' | 'Lawson'>('全部');
+  const [shoppingCategoryFilter, setShoppingCategoryFilter] = useState<string>('全部');
   const [showCalendar, setShowCalendar] = useState(false);
   const [showExpenseChartModal, setShowExpenseChartModal] = useState(false);
   const [expenseCurrency, setExpenseCurrency] = useState<'JPY' | 'TWD'>('JPY');
@@ -857,27 +1008,58 @@ export default function App() {
 
     setGeneratingSpotId(spotId);
     try {
-      const prompt = `你現在是一位專業的日本旅遊導遊，請根據我的行程名稱跟我介紹，如果分類是景點請介紹我我日文名稱，地址、關於此處的電話、營業時間、停留時間、門票價格、景點故事、旅遊攻略、附近美食；如果分類是美食請介紹這家店的日文名稱，地址、關於此處的電話、營業時間、停留時間、是否要預約、推薦菜單、店家故事；如果分類是購物請介紹我購物點的日文名稱，地址、關於此處的電話、營業時間、停留時間、購物攻略、附近美食；如果分類是交通請告訴我交通攻略、注意事項；並要能填入相對應的表格中。
+      let categoryPrompt = '';
+      if (spot.category === 'sightseeing') {
+        categoryPrompt = `當前分類為：景點 (Sightseeing)。
+請務必精準提供以下景點類別專屬資訊並寫入對應的 JSON 欄位中：
+1. 日文名稱 (locationJp): 請提供該景點對應的日文全名。
+2. 營業時間 (openingHours): 提供精準的開放或參觀時間。
+3. 門票/預算金額 (ticketPrice): 請只提供純整數數字金額（如：600，不帶任何符號，如果免費請填入 0）。
+4. 可否刷卡與支付建議 (cardAccepted): 指出是否可使用信用卡/交通IC卡/Apple Pay，或者僅限現金。
+5. 景點故事/簡介 (story): 填寫關於這個景點的有趣故事、歷史背景或看點。
+6. 旅遊攻略 (guideText): 填寫實用的旅遊攻略，如：推薦拍照點、最優參觀路線、防雷指南等（不寫在「備註 (notes)」欄位，請專門寫在「旅遊攻略 (guideText)」）。
+- 註：請將 購物攻略 (shoppingGuide)、推薦餐點 (recommendedMenuItems)、預約 (reservationRequired) 等不相關欄位留空。`;
+      } else if (spot.category === 'food') {
+        categoryPrompt = `當前分類為：美食/餐廳 (Food)。
+請務必精準提供以下美食類別專屬資訊並寫入對應的 JSON 欄位中：
+1. 日文名稱 (locationJp): 對應的日文店名/餐廳名。
+2. 營業時間 (openingHours): 精準的供餐與營業時間。
+3. 停留時間 (stayDuration): 建議用餐時間。
+4. 是否需要預約 (reservationRequired): 布林值 (true 或 false)。
+5. 可否刷卡與支付建議 (cardAccepted): 店家是否支援刷卡或僅收現金，以及是否支援點餐機刷卡。
+6. 店家故事/由來 (story): 店家的歷史傳承、料理特色、秘密醬汁等簡短故事。
+7. 招牌推薦必吃餐點 (recommendedMenuItems): 格式為物件之陣列，請推薦 2-4 個必點餐點名稱，請務必同時包含中文與日文對照名稱（格式為「中文名稱 (日文名稱)」，如：[{"name": "特上鰻魚飯 (特上うな重)"}, {"name": "玉子燒 (玉子焼き)"}]）。
+- 註：請將 門票金額 (ticketPrice)、旅遊攻略 (guideText)、購物攻略 (shoppingGuide) 欄位留空。`;
+      } else if (spot.category === 'shopping') {
+        categoryPrompt = `當前分類為：購物點 (Shopping)。
+請務必精準提供以下購物類別專屬資訊並寫入對應的 JSON 欄位中：
+1. 日文名稱 (locationJp): 購物處或商場/藥妝店的日文名。
+2. 營業時間 (openingHours): 商場或店鋪營業時間。
+3. 可否刷卡與支付建議 (cardAccepted): 對刷卡付款、退稅限制、支援 JCB/IC 卡/Apple Pay 或退稅條件說明。
+4. 購物攻略 (shoppingGuide): 店內必買好物推薦、退稅規則說明（請專門寫在「購物攻略 (shoppingGuide)」中）。
+- 註：請將 門票金額 (ticketPrice)、推薦餐點 (recommendedMenuItems)、預約 (reservationRequired)、景點故事 (story)、旅遊攻略 (guideText) 留空。`;
+      } else {
+        categoryPrompt = `當前分類為：${CATEGORY_LABELS[spot.category] || '其它'}。
+請針對此項目類型提供合適的日文名稱 (locationJp)、營業時間 (openingHours)、可否刷卡 (cardAccepted)、項目介紹與停留時間攻略資訊。`;
+      }
+
+      const prompt = `你現在是一位專業的日本旅遊導遊，請根據我的行程地點名稱進行詳細分析，並將分析結果精準填入對應的 JSON 表格欄位中。
       
-      當前項目：
+      當前地點：
       名稱：${spot.location}
       分類：${CATEGORY_LABELS[spot.category]}
       描述：${spot.description}
       
-      請提供以下資訊（繁體中文）：
-      1. 日文名稱 (locationJp)
-      2. 營業時間 (openingHours)
-      3. 推薦菜單/必吃 (recommendedMenu)
-      4. 門票/預算 (ticketPrice)
-      5. 景點故事/簡介 (story)
-      6. 旅遊攻略/備註 (notes)
-      7. 綜合 AI 攻略建議 (aiInsight)
-      8. 附近美食推薦 (nearbyFood) - 包含店名、Google Map 連結
-      9. 電話 (phone)
-      10. 停留時間 (stayDuration)
-      11. 是否需要預約 (reservationRequired)
+      ${categoryPrompt}
       
-      請以 JSON 格式回傳。`;
+      其餘通用資訊也請一併提供（請使用繁體中文）：
+      - 電話 (phone): 該地點的聯絡電話（若有）。
+      - 停留時間 (stayDuration): 建議玩多久（如 1.5 小時）。
+      - 備註 (notes): 其他任何貼心的隨行提醒。
+      - 綜合 AI 攻略建議 (aiInsight): 請填入詳細且條理清晰、排版優美（可用小標題與粗體，請使用繁體中文 Markdown 格式）的綜合 AI 旅遊攻略。
+      - 附近美食推薦 (nearbyFood): 請推薦 2 個附近走路可到的特色美食。包含店名 name，以及 Google Maps 搜尋連結 mapUrl (如: https://www.google.com/maps/search/?api=1&query=店名)。
+      
+      請嚴格以 JSON 格式回傳。`;
 
       const ai = getAiInstance();
       const response = await ai.models.generateContent({
@@ -890,14 +1072,25 @@ export default function App() {
             properties: {
               locationJp: { type: "string" },
               openingHours: { type: "string" },
-              recommendedMenu: { type: "string" },
+              stayDuration: { type: "string" },
+              phone: { type: "string" },
+              reservationRequired: { type: "boolean" },
               ticketPrice: { type: "string" },
+              cardAccepted: { type: "string" },
               story: { type: "string" },
+              guideText: { type: "string" },
+              shoppingGuide: { type: "string" },
               notes: { type: "string" },
               aiInsight: { type: "string" },
-              phone: { type: "string" },
-              stayDuration: { type: "string" },
-              reservationRequired: { type: "boolean" },
+              recommendedMenuItems: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" }
+                  }
+                }
+              },
               nearbyFood: { 
                 type: "array",
                 items: {
@@ -915,6 +1108,23 @@ export default function App() {
       });
 
       const result = JSON.parse(response.text || '{}');
+      
+      // Parse ticket price
+      if (result.ticketPrice) {
+        const numericPrice = parseInt(result.ticketPrice.toString().replace(/[^0-9]/g, ''), 10);
+        result.ticketPrice = isNaN(numericPrice) ? undefined : numericPrice;
+      }
+
+      // Format recommended menu items (convert list of objects to local items with id and basic status)
+      if (result.recommendedMenuItems && Array.isArray(result.recommendedMenuItems)) {
+        result.recommendedMenuItems = result.recommendedMenuItems.map((item: any) => ({
+          id: Math.random().toString(36).substr(2, 9),
+          name: item.name || '',
+          completed: false,
+          image: item.image || undefined
+        }));
+      }
+
       updateSpot(dayId, spotId, result);
     } catch (error: any) {
       console.error("Spot AI Generation Error:", error);
@@ -1005,7 +1215,8 @@ export default function App() {
       id: Math.random().toString(36).substr(2, 9),
       name: '新商品',
       remarks: '',
-      completed: false
+      completed: false,
+      category: 'other'
     };
     setData(prev => ({ ...prev, shoppingList: [newItem, ...prev.shoppingList] }));
   };
@@ -1022,7 +1233,8 @@ export default function App() {
       id: Math.random().toString(36).substr(2, 9),
       name: '新商品',
       remarks: '',
-      completed: false
+      completed: false,
+      category: 'other'
     };
     setData(prev => ({ ...prev, convenienceStoreList: [newItem, ...prev.convenienceStoreList] }));
   };
@@ -1254,24 +1466,45 @@ export default function App() {
                 <div className="space-y-4">
                   {/* Weather Info - Horizontal Hourly */}
                   <div className="space-y-6 px-6 py-8 bg-white rounded-[40px] border border-morandi-mist shadow-md">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <Sun className="text-orange-400" size={32} />
-                        <div>
-                          <h4 className="text-xl font-black text-morandi-clay leading-tight">京都市</h4>
-                          <p className="text-[11px] font-bold text-morandi-ash uppercase tracking-widest">Kyoto City</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-5 text-sm font-bold text-morandi-ash">
-                        <div className="flex items-center gap-2">
-                          <Sunrise size={18} className="text-morandi-sage" />
-                          <span>04:45</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Sunset size={18} className="text-morandi-clay" />
-                          <span>19:10</span>
-                        </div>
-                      </div>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between">
+                      {(() => {
+                        const currentDay = data.days.find(d => d.id === selectedDayId);
+                        const cityConfig = getCityWeatherConfig(currentDay?.city || '京都市');
+                        return (
+                          <div className="flex items-center justify-between w-full flex-wrap gap-3">
+                            <div className="flex items-center gap-4">
+                              <Sun className="text-orange-400 animate-pulse" size={32} />
+                              <div>
+                                <h4 className="text-xl font-black text-morandi-clay leading-tight">{cityConfig.ja}</h4>
+                                <p className="text-[11px] font-bold text-morandi-ash uppercase tracking-widest">{cityConfig.en} · tenki.jp天氣</p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-4 flex-wrap">
+                              <a 
+                                href={cityConfig.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="bg-morandi-clay/5 hover:bg-morandi-clay/10 text-morandi-clay border border-morandi-clay/10 px-3 py-1.5 rounded-2xl text-[10px] font-black flex items-center gap-1.5 transition-colors shrink-0"
+                              >
+                                <CloudSun size={12} className="text-[rgb(212,143,101)]" />
+                                <span>tenki.jp 預報</span>
+                              </a>
+                              
+                              <div className="flex items-center gap-4 text-xs font-bold text-morandi-ash">
+                                <div className="flex items-center gap-1">
+                                  <Sunrise size={14} className="text-morandi-sage" />
+                                  <span>04:45</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Sunset size={14} className="text-morandi-clay" />
+                                  <span>19:10</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                     
                     <div className="flex overflow-x-auto gap-4 pb-3 no-scrollbar">
@@ -1734,7 +1967,7 @@ export default function App() {
                 <div className="flex items-center justify-between px-2">
                   <h3 className="font-bold text-slate-700">消費明細</h3>
                 </div>
-                {data.expenses.map(expense => (
+                {sortExpensesByDateDesc(data.expenses).map(expense => (
                   <div 
                     key={expense.id} 
                     onClick={() => {
@@ -1744,7 +1977,7 @@ export default function App() {
                     }}
                     className="bg-white p-4 rounded-3xl shadow-xs border border-slate-100 flex items-center gap-4 group cursor-pointer hover:border-morandi-sand/30 transition-all"
                   >
-                    <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400">
+                    <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 flex-none">
                       {expense.category === 'food' && <Utensils size={20} />}
                       {expense.category === 'transport' && <Bus size={20} />}
                       {expense.category === 'hotel' && <Hotel size={20} />}
@@ -1752,11 +1985,34 @@ export default function App() {
                       {expense.category === 'ticket' && <Ticket size={20} />}
                       {expense.category === 'other' && <Info size={20} />}
                     </div>
-                    <div className="flex-1 space-y-1">
-                      <p className="font-bold text-slate-800">{expense.name}</p>
+                    <div className="flex-1 space-y-1 min-w-0">
+                      <p className="font-bold text-slate-800 break-words whitespace-normal leading-snug">{expense.name}</p>
                       <p className="text-[10px] text-slate-400">{expense.date} · {EXPENSE_CATEGORY_LABELS[expense.category]}</p>
+                      {expense.notes && (
+                        <p className="text-[10px] text-morandi-ash bg-slate-50/80 px-2 py-1 rounded-lg border border-slate-100 font-medium leading-relaxed break-words whitespace-normal mt-1">
+                          {expense.notes}
+                        </p>
+                      )}
+                      {/* Pictures preview if any images exist */}
+                      {expense.images && expense.images.length > 0 && (
+                        <div className="flex gap-1 mt-1.5 overflow-hidden">
+                          {expense.images.slice(0, 3).map((img, idx) => (
+                            <img 
+                              key={idx} 
+                              src={img} 
+                              className="w-7 h-7 object-cover rounded-lg border border-slate-100 flex-none" 
+                              referrerPolicy="no-referrer"
+                            />
+                          ))}
+                          {expense.images.length > 3 && (
+                            <div className="w-7 h-7 bg-slate-100 rounded-lg flex items-center justify-center text-[8px] font-bold text-slate-500 border border-slate-100 flex-none">
+                              +{expense.images.length - 3}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right space-y-1">
+                    <div className="text-right space-y-1 flex-none">
                       <p className="font-bold text-slate-800">{expense.currency === 'JPY' ? 'JPY ¥' : 'TWD $'} {(expense.amount || 0).toLocaleString()}</p>
                       {expense.currency === 'JPY' && (
                         <p className="text-[10px] text-slate-400">≈ TWD $ {Math.round((expense.amount || 0) * exchangeRate).toLocaleString()}</p>
@@ -1767,7 +2023,7 @@ export default function App() {
                         e.stopPropagation();
                         handleDeleteExpense(expense.id);
                       }}
-                      className="text-slate-200 hover:text-red-400 transition-colors"
+                      className="text-slate-200 hover:text-red-400 transition-colors flex-none"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -1796,8 +2052,55 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Shopping Filter Bar */}
+                <div className="flex bg-slate-100 p-1 rounded-2xl w-full overflow-x-auto no-scrollbar gap-1">
+                  {[
+                    { key: '全部', label: '全部' },
+                    { key: 'pharmacy', label: '藥妝' },
+                    { key: 'gift', label: '伴手禮' },
+                    { key: 'supermarket', label: '超市' },
+                    { key: 'apparel', label: '服飾' },
+                    { key: 'muji', label: '無印' },
+                    { key: 'gu', label: 'GU' },
+                    { key: 'uq', label: 'UQ' },
+                    { key: 'other', label: '其它' }
+                  ].map((opt) => {
+                    const isSelected = shoppingCategoryFilter === opt.key;
+                    const activeStyle = 
+                      opt.key === '全部' ? 'bg-white text-slate-800 shadow-xs border-slate-200 font-black' :
+                      opt.key === 'pharmacy' ? 'bg-rose-500 text-white shadow-xs font-black' :
+                      opt.key === 'gift' ? 'bg-amber-500 text-white shadow-xs font-black' :
+                      opt.key === 'supermarket' ? 'bg-emerald-600 text-white shadow-xs font-black' :
+                      opt.key === 'apparel' ? 'bg-blue-500 text-white shadow-xs font-black' :
+                      opt.key === 'muji' ? 'bg-red-500 text-white shadow-xs font-black' :
+                      opt.key === 'gu' ? 'bg-indigo-600 text-white shadow-xs font-black' :
+                      opt.key === 'uq' ? 'bg-sky-500 text-white shadow-xs font-black' :
+                      'bg-slate-500 text-white shadow-xs font-black';
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setShoppingCategoryFilter(opt.key)}
+                        className={cn(
+                          "px-4 py-1.5 text-xs font-bold rounded-xl transition-all border border-transparent whitespace-nowrap",
+                          isSelected 
+                            ? activeStyle 
+                            : "text-slate-500 hover:text-slate-700 bg-transparent"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
-                  {data.shoppingList.map(item => (
+                  {data.shoppingList
+                    .filter(item => {
+                      if (shoppingCategoryFilter === '全部') return true;
+                      return (item.category || 'other') === shoppingCategoryFilter;
+                    })
+                    .map(item => (
                     <div 
                       key={item.id} 
                       onClick={() => {
@@ -1835,32 +2138,53 @@ export default function App() {
                         />
                       </div>
                       
-                      <div className="space-y-1 flex-1">
-                        <div className="flex items-start justify-between gap-1">
-                          <textarea 
-                            className={cn("font-bold text-sm w-full bg-transparent border-none focus:outline-none leading-tight resize-none h-10", item.completed && "line-through")}
-                            value={item.name}
-                            onChange={e => setData(prev => ({
-                              ...prev,
-                              shoppingList: prev.shoppingList.map(i => i.id === item.id ? { ...i, name: e.target.value } : i)
-                            }))}
-                          />
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-1.5">
+                          <p className={cn(
+                            "font-bold text-sm text-slate-800 break-words whitespace-normal leading-snug flex-1",
+                            item.completed && "line-through text-slate-400"
+                          )}>
+                            {item.name || '新商品'}
+                          </p>
                           <button 
-                            onClick={() => toggleShoppingItem(item.id)}
-                            className={cn("transition-colors flex-none", item.completed ? "text-kyoto-matcha" : "text-slate-200")}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleShoppingItem(item.id);
+                            }}
+                            className={cn("transition-colors flex-none mt-0.5", item.completed ? "text-kyoto-matcha" : "text-slate-200")}
                           >
                             {item.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
                           </button>
                         </div>
-                        <textarea 
-                          className="text-[10px] text-slate-400 w-full bg-transparent border-none focus:outline-none resize-none h-8 leading-tight"
-                          placeholder="備註..."
-                          value={item.remarks}
-                          onChange={e => setData(prev => ({
-                            ...prev,
-                            shoppingList: prev.shoppingList.map(i => i.id === item.id ? { ...i, remarks: e.target.value } : i)
-                          }))}
-                        />
+
+                        {/* Category & Link Badge */}
+                        <div className="flex flex-wrap gap-1.5 items-center pt-1">
+                          <span className={cn(
+                            "inline-block px-1.5 py-0.5 rounded-md text-[8px] font-black border tracking-wider",
+                            SHOPPING_CATEGORY_COLORS[item.category || 'other']
+                          )}>
+                            {SHOPPING_CATEGORY_LABELS[item.category || 'other']}
+                          </span>
+                          {item.link && (
+                            <a 
+                              href={item.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-0.5 text-[8px] text-morandi-blue bg-blue-50/50 border border-blue-100 hover:bg-blue-100/70 px-1 py-0.5 rounded font-black transition-all"
+                            >
+                              <ExternalLink size={8} />
+                              <span>連結</span>
+                            </a>
+                          )}
+                        </div>
+
+                        {item.remarks && (
+                          <p className="text-[10px] text-slate-400 font-medium break-words whitespace-normal leading-normal whitespace-pre-wrap">
+                            {item.remarks}
+                          </p>
+                        )}
                       </div>
 
                       <button 
@@ -1880,93 +2204,169 @@ export default function App() {
               {/* Convenience Store Section */}
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-serif text-slate-800">超商推薦清單</h2>
+                  <div>
+                    <h2 className="text-2xl font-serif text-slate-800">超商推薦清單</h2>
+                  </div>
                   <button 
                     onClick={addConvenienceItem}
-                    className="w-10 h-10 bg-morandi-blue text-white rounded-xl flex items-center justify-center shadow-lg hover:opacity-90 transition-colors"
+                    className="w-10 h-10 bg-morandi-blue text-white rounded-xl flex items-center justify-center shadow-lg hover:opacity-90 transition-colors shrink-0"
                   >
                     <Plus size={20} />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  {data.convenienceStoreList.map(item => (
-                    <div 
-                      key={item.id} 
-                      onClick={() => {
-                        setSelectedShoppingItem({ id: item.id, listType: 'convenience' });
-                        setShowShoppingModal(true);
-                      }}
-                      className={cn(
-                        "bg-white p-3 rounded-3xl shadow-xs border transition-all flex flex-col gap-3 relative group cursor-pointer",
-                        item.completed ? "opacity-60 border-transparent" : "border-slate-100"
-                      )}
-                    >
-                      <div className="w-full aspect-square bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300 relative overflow-hidden group/img">
-                        {item.image ? (
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          <Camera size={24} />
+                {/* Store Tab Filter Bar */}
+                <div className="flex bg-slate-100 p-1 rounded-2xl w-fit max-w-full overflow-x-auto no-scrollbar gap-1">
+                  {(['全部', '7-11', '全家', 'Lawson'] as const).map((filterVal) => {
+                    const isSelected = convenienceStoreFilter === filterVal;
+                    const activeStyle = 
+                      filterVal === '全部' ? 'bg-white text-slate-800 shadow-xs border-slate-200' :
+                      filterVal === '7-11' ? 'bg-[rgb(242,110,34)] text-white shadow-xs' :
+                      filterVal === '全家' ? 'bg-emerald-600 text-white shadow-xs' :
+                      'bg-blue-600 text-white shadow-xs';
+                    return (
+                      <button
+                        key={filterVal}
+                        type="button"
+                        onClick={() => setConvenienceStoreFilter(filterVal)}
+                        className={cn(
+                          "px-4 py-1.5 text-xs font-bold rounded-xl transition-all border border-transparent whitespace-nowrap",
+                          isSelected 
+                            ? activeStyle 
+                            : "text-slate-500 hover:text-slate-700 bg-transparent"
                         )}
-                        <input 
-                          type="file" 
-                          accept="image/*"
-                          className="absolute inset-0 opacity-0 cursor-pointer"
-                          onChange={e => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                setData(prev => ({
-                                  ...prev,
-                                  convenienceStoreList: prev.convenienceStoreList.map(i => i.id === item.id ? { ...i, image: reader.result as string } : i)
-                                }));
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                      </div>
-                      
-                      <div className="space-y-1 flex-1">
-                        <div className="flex items-start justify-between gap-1">
-                          <textarea 
-                            className={cn("font-bold text-sm w-full bg-transparent border-none focus:outline-none leading-tight resize-none h-10", item.completed && "line-through")}
-                            value={item.name}
-                            onChange={e => setData(prev => ({
-                              ...prev,
-                              convenienceStoreList: prev.convenienceStoreList.map(i => i.id === item.id ? { ...i, name: e.target.value } : i)
-                            }))}
-                          />
-                          <button 
-                            onClick={() => toggleConvenienceItem(item.id)}
-                            className={cn("transition-colors flex-none", item.completed ? "text-morandi-blue" : "text-slate-200")}
-                          >
-                            {item.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
-                          </button>
-                        </div>
-                        <textarea 
-                          className="text-[10px] text-slate-400 w-full bg-transparent border-none focus:outline-none resize-none h-8 leading-tight"
-                          placeholder="備註..."
-                          value={item.remarks}
-                          onChange={e => setData(prev => ({
-                            ...prev,
-                            convenienceStoreList: prev.convenienceStoreList.map(i => i.id === item.id ? { ...i, remarks: e.target.value } : i)
-                          }))}
-                        />
-                      </div>
-
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setData(prev => ({ ...prev, convenienceStoreList: prev.convenienceStoreList.filter(i => i.id !== item.id) }));
-                        }}
-                        className="absolute -top-1 -right-1 w-6 h-6 bg-white rounded-full shadow-md flex items-center justify-center text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                       >
-                        <Trash2 size={12} />
+                        {filterVal}
                       </button>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {data.convenienceStoreList
+                    .filter(item => {
+                      if (convenienceStoreFilter === '全部') return true;
+                      return item.convenienceStores && item.convenienceStores.includes(convenienceStoreFilter);
+                    })
+                    .map(item => (
+                      <div 
+                        key={item.id} 
+                        onClick={() => {
+                          setSelectedShoppingItem({ id: item.id, listType: 'convenience' });
+                          setShowShoppingModal(true);
+                        }}
+                        className={cn(
+                          "bg-white p-3 rounded-3xl shadow-xs border transition-all flex flex-col gap-3 relative group cursor-pointer",
+                          item.completed ? "opacity-60 border-transparent" : "border-slate-100"
+                        )}
+                      >
+                        <div className="w-full aspect-square bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300 relative overflow-hidden group/img">
+                          {item.image ? (
+                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <Camera size={24} />
+                          )}
+                          <input 
+                            type="file" 
+                            accept="image/*"
+                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setData(prev => ({
+                                    ...prev,
+                                    convenienceStoreList: prev.convenienceStoreList.map(i => i.id === item.id ? { ...i, image: reader.result as string } : i)
+                                  }));
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </div>
+                        
+                        <div className="space-y-1.5 flex-1 min-w-0 flex flex-col justify-between">
+                          <div className="space-y-1">
+                            <div className="flex items-start justify-between gap-1.5">
+                              <p className={cn(
+                                "font-bold text-sm text-slate-800 break-words whitespace-normal leading-snug flex-1",
+                                item.completed && "line-through text-slate-400"
+                              )}>
+                                {item.name || '新商品'}
+                              </p>
+                              <button 
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleConvenienceItem(item.id);
+                                }}
+                                className={cn("transition-colors flex-none mt-0.5", item.completed ? "text-morandi-blue" : "text-slate-200")}
+                              >
+                                {item.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+                              </button>
+                            </div>
+
+                            {item.remarks && (
+                              <p className="text-[10px] text-slate-400 font-medium break-words whitespace-normal leading-normal whitespace-pre-wrap">
+                                {item.remarks}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5 pt-1">
+                            {/* Convenience Store Brands Tags */}
+                            <div className="flex flex-wrap gap-1">
+                              {item.convenienceStores && item.convenienceStores.length > 0 ? (
+                                item.convenienceStores.map(store => {
+                                  const tagStyle = 
+                                    store === '7-11' ? 'bg-orange-50 text-orange-600 border-orange-200' :
+                                    store === '全家' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' :
+                                    'bg-blue-50 text-blue-600 border-blue-200';
+                                  return (
+                                    <span key={store} className={cn(
+                                      "inline-block px-1.5 py-0.5 rounded-md text-[8px] font-black border tracking-wider",
+                                      tagStyle
+                                    )}>
+                                      {store}
+                                    </span>
+                                  );
+                                })
+                              ) : (
+                                <span className="inline-block px-1.5 py-0.5 rounded-md text-[8px] font-black border tracking-wider bg-slate-50 text-slate-400 border-slate-200">
+                                  通用
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Clickable Card Link Indicator */}
+                            {item.link && (
+                              <a 
+                                href={item.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-[10px] text-morandi-blue bg-blue-50/50 border border-blue-100 hover:bg-blue-100/70 px-2 py-0.5 rounded-lg font-bold transition-all w-fit"
+                              >
+                                <ExternalLink size={10} />
+                                <span>商品連結</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setData(prev => ({ ...prev, convenienceStoreList: prev.convenienceStoreList.filter(i => i.id !== item.id) }));
+                          }}
+                          className="absolute -top-1 -right-1 w-6 h-6 bg-white rounded-full shadow-md flex items-center justify-center text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
                 </div>
               </div>
             </motion.div>
@@ -2149,6 +2549,18 @@ export default function App() {
                                 <span className="text-slate-300">|</span>
                                 <span>退房: {h.checkOut}</span>
                               </div>
+                              {h.bookingUrl && (
+                                <a 
+                                  href={h.bookingUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 px-2 py-1 rounded-lg font-black transition-all"
+                                >
+                                  <ExternalLink size={10} />
+                                  <span>線上訂房</span>
+                                </a>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -2184,7 +2596,7 @@ export default function App() {
                     </button>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
-                    {data.transportOrders.map(order => (
+                    {sortTransportOrdersByDate(data.transportOrders, data.year).map(order => (
                       <motion.div 
                         key={order.id} 
                         whileTap={{ scale: 0.98 }}
@@ -2200,9 +2612,26 @@ export default function App() {
                           </div>
                           <div>
                             <h4 className="font-black text-sm text-morandi-clay">{order.name}</h4>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 mt-0.5">
                               {order.date && <p className="text-[10px] font-bold text-morandi-ash">{order.date}</p>}
                               <p className="text-[10px] font-bold text-morandi-ash">{order.location}</p>
+                              {order.images && order.images.length > 0 && (
+                                <span className="bg-morandi-blue/10 text-morandi-blue px-1.5 py-0.5 rounded text-[8px] font-black flex items-center gap-0.5">
+                                  <Camera size={8} /> {order.images.length} 張
+                                </span>
+                              )}
+                              {order.url && (
+                                <a 
+                                  href={order.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 px-1.5 py-0.5 rounded text-[8px] font-black flex items-center gap-0.5 transition-colors"
+                                >
+                                  <ExternalLink size={8} />
+                                  <span>連結</span>
+                                </a>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -2352,6 +2781,58 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+
+                  {/* Baggage Packing Regulations */}
+                  <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-200/60 mt-6 space-y-5">
+                    <div className="space-y-1">
+                      <h4 className="text-base font-black text-slate-800 flex items-center gap-2">
+                        <ShieldAlert size={18} className="text-amber-600 animate-pulse" />
+                        出入境行李打包注意事項
+                      </h4>
+                      <p className="text-[11px] text-slate-400 font-medium">台日航線最新出入境行李安全規定與託運限制</p>
+                    </div>
+
+                    <div className="space-y-4 text-xs">
+                      {/* Carry-on Only */}
+                      <div className="bg-white p-4 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex items-center gap-1.5 text-amber-600 font-black">
+                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                          <span>只能隨身攜帶 (嚴禁託運)</span>
+                        </div>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-500 font-medium leading-relaxed">
+                          <li><strong>行動電源與備用鋰電池</strong>：必須隨身攜帶，標示需清晰。</li>
+                          <li><strong>打火機</strong>：每人限單個普通打火機 (不可攜帶防風/藍焰打火機)。</li>
+                          <li><strong>暖暖包</strong>：常溫型、開封型暖暖包(液體型不行，隨身需通關申報)。</li>
+                        </ul>
+                      </div>
+
+                      {/* Checked Only */}
+                      <div className="bg-white p-4 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex items-center gap-1.5 text-blue-600 font-black">
+                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                          <span>只能託運行李 (嚴禁隨身)</span>
+                        </div>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-500 font-medium leading-relaxed">
+                          <li><strong>液態限制</strong>：單樣容器超過 <strong>100ml</strong> 限制 (如化妝水、噴霧、洗沐品)。随身攜帶需在100ml以內並置於1公升透明袋。</li>
+                          <li><strong>刀具與尖銳物</strong>：剪刀、美工刀、瑞士刀、指甲剪、修眉刀、餐刀等。</li>
+                          <li><strong>腳架與自拍棒</strong>：管徑超過 1cm 且摺疊收合後<strong>高度超過 60cm</strong> 必須託運。</li>
+                        </ul>
+                      </div>
+
+                      {/* Prohibited items */}
+                      <div className="bg-rose-50/50 p-4 rounded-2xl border border-rose-100 space-y-2">
+                        <div className="flex items-center gap-1.5 text-rose-600 font-black">
+                          <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+                          <span>嚴格禁止攜帶 (入出境限制)</span>
+                        </div>
+                        <ul className="list-disc pl-4 space-y-1 text-rose-700 font-medium leading-relaxed">
+                          <li><strong>肉類食品與加工品</strong>：豬肉/牛肉製品、泡麵含大塊肉片、肉乾、肉丸。</li>
+                          <li><strong>新鮮蔬果、植物、種子</strong>：未經檢疫完全禁止攜帶入境。</li>
+                          <li><strong>違禁品與氣體</strong>：防狼噴霧 (日本離境禁止打包或攜帶)、易燃高壓氣體。</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -2510,6 +2991,7 @@ export default function App() {
       <AnimatePresence>
         {showShoppingModal && selectedShoppingItem && (
           <ShoppingEditModal 
+            isConvenience={selectedShoppingItem.listType === 'convenience'}
             item={
               selectedShoppingItem.listType === 'shopping' 
                 ? data.shoppingList.find(i => i.id === selectedShoppingItem.id)!
@@ -2687,6 +3169,8 @@ function ExpenseModal({
   const [date, setDate] = useState(expenseToEdit?.date || new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'credit'>(expenseToEdit?.paymentMethod || 'cash');
   const [category, setCategory] = useState<ExpenseCategory>(expenseToEdit?.category || 'other');
+  const [images, setImages] = useState<string[]>(expenseToEdit?.images || []);
+  const [notes, setNotes] = useState(expenseToEdit?.notes || '');
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-5">
@@ -2701,7 +3185,7 @@ function ExpenseModal({
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="bg-white w-full max-w-[320px] rounded-[32px] shadow-2xl relative z-10 overflow-hidden"
+        className="bg-white w-full max-w-[340px] rounded-[32px] shadow-2xl relative z-10 overflow-hidden max-h-[90vh] flex flex-col"
       >
         <div className="flex items-center justify-between p-5 border-b border-morandi-sand/10">
           <h3 className="text-xl font-black text-slate-800">{expenseToEdit ? '編輯支出' : '新增支出'}</h3>
@@ -2710,7 +3194,7 @@ function ExpenseModal({
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1 no-scrollbar">
           <div className="space-y-1">
             <label className="text-[9px] font-bold text-morandi-ash uppercase tracking-widest px-1">日期</label>
             <input 
@@ -2728,6 +3212,7 @@ function ExpenseModal({
                 {['JPY', 'TWD'].map(curr => (
                   <button
                     key={curr}
+                    type="button"
                     onClick={() => setExpenseCurrency(curr === 'JPY' ? 'JPY' : 'TWD')}
                     className={cn(
                       "px-2 py-0.5 text-[8px] font-black rounded-md transition-all",
@@ -2788,8 +3273,67 @@ function ExpenseModal({
               onChange={e => setName(e.target.value)}
             />
           </div>
+
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-morandi-ash uppercase tracking-widest px-1">備註</label>
+            <textarea 
+              rows={2}
+              className="w-full bg-morandi-mist border border-morandi-sand/20 rounded-xl p-3 focus:outline-none text-xs text-morandi-clay font-bold resize-none" 
+              placeholder="例如：御守、伴手禮等詳細說明" 
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-morandi-ash uppercase tracking-widest px-1 flex items-center gap-1">
+              <Camera size={12} className="text-morandi-clay" />
+              收據 / 消費照片
+            </label>
+            <div className="grid grid-cols-2 gap-2.5 mt-1">
+              {images.map((img, idx) => (
+                <div key={idx} className="aspect-video bg-slate-100 rounded-xl overflow-hidden relative group border border-slate-100">
+                  <img src={img} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const newList = [...images];
+                      newList.splice(idx, 1);
+                      setImages(newList);
+                    }}
+                    className="absolute top-1.5 right-1.5 w-5 h-5 bg-white/80 hover:bg-white rounded-full flex items-center justify-center text-red-500 transition-colors shadow-xs"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                </div>
+              ))}
+              <div className="aspect-video bg-morandi-mist rounded-xl border border-dashed border-slate-300 flex items-center justify-center text-slate-400 overflow-hidden relative cursor-pointer hover:bg-slate-200 transition-colors">
+                <div className="text-center">
+                  <Plus size={16} className="mx-auto mb-0.5 text-slate-400" />
+                  <span className="text-[8px] font-bold">新照片</span>
+                </div>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  multiple
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  onChange={e => {
+                    const files = Array.from(e.target.files || []);
+                    files.forEach(file => {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setImages(prev => [...prev, reader.result as string]);
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                  }}
+                />
+              </div>
+            </div>
+          </div>
           
           <button 
+            type="button"
             onClick={() => {
               const parsedAmount = parseFloat(amount) || 0;
               if (name && parsedAmount > 0) {
@@ -2801,11 +3345,12 @@ function ExpenseModal({
                   currency: expenseCurrency,
                   paymentMethod,
                   category,
-                  notes: expenseToEdit?.notes || ''
+                  notes,
+                  images
                 });
               }
             }}
-            className="w-full bg-morandi-clay text-white py-3 rounded-xl font-bold shadow-lg hover:opacity-90 transition-opacity text-[10px] uppercase tracking-widest mt-2"
+            className="w-full bg-morandi-clay text-white py-3 rounded-xl font-bold shadow-lg hover:opacity-90 transition-opacity text-[10px] uppercase tracking-widest mt-2 flex-none"
           >
             {expenseToEdit ? '確認修改' : '確認新增'}
           </button>
@@ -2819,12 +3364,14 @@ function ShoppingEditModal({
   item, 
   onClose, 
   onUpdate,
-  onDelete
+  onDelete,
+  isConvenience = false
 }: { 
   item: ShoppingItem; 
   onClose: () => void; 
   onUpdate: (updated: ShoppingItem) => void;
   onDelete: () => void;
+  isConvenience?: boolean;
 }) {
   const [localItem, setLocalItem] = useState<ShoppingItem>(item);
 
@@ -2832,6 +3379,14 @@ function ShoppingEditModal({
     const updated = { ...localItem, ...updates };
     setLocalItem(updated);
     onUpdate(updated);
+  };
+
+  const toggleStore = (store: string) => {
+    const selectedStores = localItem.convenienceStores || [];
+    const nextStores = selectedStores.includes(store)
+      ? selectedStores.filter(s => s !== store)
+      : [...selectedStores, store];
+    handleUpdate({ convenienceStores: nextStores });
   };
 
   return (
@@ -2856,7 +3411,7 @@ function ShoppingEditModal({
           >
             <X size={24} />
           </button>
-          <h3 className="text-xl font-black text-morandi-clay">編輯項目</h3>
+          <h3 className="text-xl font-black text-morandi-clay">{isConvenience ? '編輯超商商品' : '編輯購物項目'}</h3>
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 py-4 space-y-6 no-scrollbar">
@@ -2897,6 +3452,60 @@ function ShoppingEditModal({
               />
             </div>
 
+            {isConvenience ? (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-morandi-ash uppercase tracking-widest px-1">超商分類 (可多選)</label>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {['7-11', '全家', 'Lawson'].map((store) => {
+                    const isSelected = (localItem.convenienceStores || []).includes(store);
+                    const activeColor = 
+                      store === '7-11' ? 'bg-[rgb(242,110,34)] text-white shadow-xs border-transparent' :
+                      store === '全家' ? 'bg-emerald-600 text-white shadow-xs border-transparent' :
+                      'bg-blue-600 text-white shadow-xs border-transparent';
+                    return (
+                      <button
+                        key={store}
+                        type="button"
+                        onClick={() => toggleStore(store)}
+                        className={cn(
+                          "px-4 py-2 text-xs font-bold rounded-xl border transition-all",
+                          isSelected 
+                            ? `${activeColor} ring-2 ring-morandi-clay/20 font-black scale-105` 
+                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                        )}
+                      >
+                        {store}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-morandi-ash uppercase tracking-widest px-1">分類</label>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {Object.entries(SHOPPING_CATEGORY_LABELS).map(([catKey, catLabel]) => {
+                    const isSelected = (localItem.category || 'other') === catKey;
+                    return (
+                      <button
+                        key={catKey}
+                        type="button"
+                        onClick={() => handleUpdate({ category: catKey as any })}
+                        className={cn(
+                          "px-3 py-1.5 text-xs font-bold rounded-xl border transition-all",
+                          isSelected 
+                            ? `${SHOPPING_CATEGORY_COLORS[catKey]} ring-2 ring-morandi-clay/20 font-black scale-105 shadow-xs` 
+                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                        )}
+                      >
+                        {catLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-morandi-ash uppercase tracking-widest px-1">備註</label>
               <textarea 
@@ -2909,14 +3518,27 @@ function ShoppingEditModal({
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-morandi-ash uppercase tracking-widest px-1">連結</label>
-              <div className="relative">
-                <Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-morandi-sand" />
-                <input 
-                  className="w-full bg-morandi-mist border border-morandi-sand/20 rounded-2xl p-4 pl-12 focus:outline-none text-sm text-morandi-clay font-medium"
-                  placeholder="貼上連結..."
-                  value={localItem.link || ''}
-                  onChange={e => handleUpdate({ link: e.target.value })}
-                />
+              <div className="relative flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-morandi-sand" />
+                  <input 
+                    className="w-full bg-morandi-mist border border-morandi-sand/20 rounded-2xl p-4 pl-12 focus:outline-none text-sm text-morandi-clay font-medium"
+                    placeholder="貼上連結..."
+                    value={localItem.link || ''}
+                    onChange={e => handleUpdate({ link: e.target.value })}
+                  />
+                </div>
+                {localItem.link && (
+                  <a 
+                    href={localItem.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-morandi-clay text-white rounded-2xl hover:opacity-95 transition-all shrink-0 flex items-center justify-center h-[52px] w-[52px] shadow-md border border-slate-100"
+                    title="點入跳轉連結頁"
+                  >
+                    <ExternalLink size={20} />
+                  </a>
+                )}
               </div>
             </div>
           </div>
@@ -3078,14 +3700,27 @@ function FlightEditModal({
 
           <div className="space-y-1">
             <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">機票連結</label>
-            <div className="relative">
-              <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
-              <input 
-                className="w-full bg-slate-50 border-none rounded-2xl p-3 pl-10 text-xs font-bold text-slate-700 focus:outline-none"
-                placeholder="貼上連結..."
-                value={localFlight.ticketUrl || ''}
-                onChange={e => handleUpdate({ ticketUrl: e.target.value })}
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                <input 
+                  className="w-full bg-slate-50 border-none rounded-2xl p-3 pl-10 text-xs font-bold text-slate-700 focus:outline-none"
+                  placeholder="貼上連結..."
+                  value={localFlight.ticketUrl || ''}
+                  onChange={e => handleUpdate({ ticketUrl: e.target.value })}
+                />
+              </div>
+              {localFlight.ticketUrl && (
+                <a 
+                  href={localFlight.ticketUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-morandi-blue text-white rounded-2xl flex items-center justify-center shrink-0 h-[42px] w-[42px] shadow-md border border-slate-100 hover:opacity-95 transition-opacity"
+                  title="點入跳轉連結頁"
+                >
+                  <ExternalLink size={16} />
+                </a>
+              )}
             </div>
           </div>
 
@@ -3220,14 +3855,27 @@ function HotelEditModal({
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">訂房連結</label>
-              <div className="relative">
-                <Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-                <input 
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 pl-12 text-sm font-bold text-slate-700 focus:outline-none"
-                  placeholder="貼上連結..."
-                  value={localHotel.bookingUrl || ''}
-                  onChange={e => handleUpdate({ bookingUrl: e.target.value })}
-                />
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                  <input 
+                    className="w-full bg-slate-50 border-none rounded-2xl p-4 pl-12 text-sm font-bold text-slate-700 focus:outline-none"
+                    placeholder="貼上連結..."
+                    value={localHotel.bookingUrl || ''}
+                    onChange={e => handleUpdate({ bookingUrl: e.target.value })}
+                  />
+                </div>
+                {localHotel.bookingUrl && (
+                  <a 
+                    href={localHotel.bookingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-morandi-clay text-white rounded-2xl flex items-center justify-center shrink-0 h-[52px] w-[52px] shadow-md border border-slate-100 hover:opacity-95 transition-opacity"
+                    title="點入跳轉連結頁"
+                  >
+                    <ExternalLink size={20} />
+                  </a>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -3365,14 +4013,27 @@ function TransportEditModal({
 
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">票卷連結</label>
-            <div className="relative">
-              <Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-              <input 
-                className="w-full bg-slate-50 border-none rounded-2xl p-4 pl-12 text-sm font-bold text-slate-700 focus:outline-none"
-                placeholder="貼上連結..."
-                value={localOrder.url || ''}
-                onChange={e => handleUpdate({ url: e.target.value })}
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                <input 
+                  className="w-full bg-slate-50 border-none rounded-2xl p-4 pl-12 text-sm font-bold text-slate-700 focus:outline-none"
+                  placeholder="貼上連結..."
+                  value={localOrder.url || ''}
+                  onChange={e => handleUpdate({ url: e.target.value })}
+                />
+              </div>
+              {localOrder.url && (
+                <a 
+                  href={localOrder.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-morandi-clay text-white rounded-2xl flex items-center justify-center shrink-0 h-[52px] w-[52px] shadow-md border border-slate-100 hover:opacity-95 transition-opacity"
+                  title="點入跳轉連結頁"
+                >
+                  <ExternalLink size={20} />
+                </a>
+              )}
             </div>
           </div>
 
@@ -3384,6 +4045,54 @@ function TransportEditModal({
               value={localOrder.remarks || ''}
               onChange={e => handleUpdate({ remarks: e.target.value })}
             />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+              <Camera size={12} className="text-morandi-clay" />
+              相關照片
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              {(localOrder.images || []).map((img, idx) => (
+                <div key={idx} className="aspect-video bg-slate-100 rounded-2xl overflow-hidden relative group border border-slate-100">
+                  <img src={img} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const newList = [...(localOrder.images || [])];
+                      newList.splice(idx, 1);
+                      handleUpdate({ images: newList });
+                    }}
+                    className="absolute top-2 right-2 w-6 h-6 bg-white/80 hover:bg-white rounded-full flex items-center justify-center text-red-500 transition-colors shadow-sm"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+              <div className="aspect-video bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex items-center justify-center text-slate-400 overflow-hidden relative cursor-pointer hover:bg-slate-100/50 transition-colors">
+                <div className="text-center">
+                  <Plus size={20} className="mx-auto mb-1 text-slate-400" />
+                  <span className="text-[10px] font-bold">新增照片</span>
+                </div>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  multiple
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  onChange={e => {
+                    const files = Array.from(e.target.files || []);
+                    files.forEach(file => {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        const currentImages = localOrder.images || [];
+                        handleUpdate({ images: [...currentImages, reader.result as string] });
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                  }}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 mt-4">
@@ -3481,7 +4190,7 @@ const AboutGrid = ({ fields, localSpot, handleUpdate }: {
       {fields.includes('ticket') && (
         <div className="bg-white p-4 rounded-2xl border border-morandi-sand/20 space-y-3 shadow-sm">
           <div className="flex items-center justify-between">
-            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">TICKET PRICE</p>
+            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">TICKET PRICE / 門票預算</p>
             <div className="flex bg-morandi-mist p-1 rounded-xl">
                 <button 
                   onClick={() => handleUpdate({ ticketCurrency: 'JPY' })}
@@ -3498,11 +4207,39 @@ const AboutGrid = ({ fields, localSpot, handleUpdate }: {
             </div>
           </div>
           <input 
-            className="w-full bg-transparent border-none font-black text-morandi-clay focus:outline-none text-xl"
+            className="w-full bg-transparent border-none font-black text-morandi-clay focus:outline-none text-xl border-b border-dashed border-slate-100 pb-1"
             placeholder="0"
             type="number"
             value={localSpot.ticketPrice || ''}
             onChange={e => handleUpdate({ ticketPrice: Number(e.target.value) })}
+          />
+          <div className="space-y-1 pt-1">
+            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest flex items-center gap-1">
+              <Wallet size={10} className="text-amber-500 shrink-0" />
+              <span>可否刷卡 / 支付資訊 (CARD ACCEPTANCE)</span>
+            </p>
+            <textarea 
+              className="w-full bg-slate-50 border-none rounded-xl p-2.5 font-bold text-morandi-clay focus:outline-none text-xs min-h-[60px] resize-none leading-relaxed"
+              placeholder="例如：可刷信用卡、僅收現金、支援 Apple Pay/交通IC卡"
+              rows={2}
+              value={localSpot.cardAccepted || ''}
+              onChange={e => handleUpdate({ cardAccepted: e.target.value })}
+            />
+          </div>
+        </div>
+      )}
+      {!fields.includes('ticket') && (localSpot.category === 'food' || localSpot.category === 'shopping') && (
+        <div className="bg-white p-4 rounded-2xl border border-morandi-sand/20 space-y-2 shadow-sm">
+          <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest flex items-center gap-1">
+            <Wallet size={10} className="text-amber-500 shrink-0" />
+            <span>可否刷卡 / 支付資訊 (CARD ACCEPTANCE)</span>
+          </p>
+          <textarea 
+            className="w-full bg-slate-50 border-none rounded-xl p-2.5 font-bold text-morandi-clay focus:outline-none text-xs min-h-[60px] resize-none leading-relaxed"
+            placeholder="例如：可刷信用卡、僅收現金、支援 Apple Pay/交通IC卡"
+            rows={2}
+            value={localSpot.cardAccepted || ''}
+            onChange={e => handleUpdate({ cardAccepted: e.target.value })}
           />
         </div>
       )}
@@ -3870,19 +4607,49 @@ function SpotEditModal({
           {localSpot.category === 'transport' && (
             <div className="space-y-6">
               <SectionTitle icon={Bus} title="交通&其它資訊" />
-              <div className="grid grid-cols-1 gap-4">
-                {data.transportOrders.map(order => (
-                  <div key={order.id} className="bg-white p-6 rounded-[32px] border border-morandi-sand/20 shadow-sm group relative">
-                    <div className="flex gap-4">
-                      <div className="bg-morandi-blue/10 w-12 h-12 rounded-2xl flex-none flex items-center justify-center text-morandi-blue transition-colors">
-                        <Ticket size={24} />
+              <div className="grid grid-cols-1 gap-6">
+                {sortTransportOrdersByDate(data.transportOrders, data.year).map(order => {
+                  const isCurrentSpot = order.name === localSpot.location;
+                  return (
+                    <div 
+                      key={order.id} 
+                      className={cn(
+                        "rounded-[28px] border overflow-hidden relative shadow-md transition-all duration-300",
+                        isCurrentSpot 
+                          ? "bg-slate-50/70 border-morandi-blue/45 ring-2 ring-morandi-blue/15" 
+                          : "bg-white border-slate-100"
+                      )}
+                    >
+                      {/* Ticket Header */}
+                      <div className="px-6 py-4 flex items-center justify-between bg-slate-900 text-white rounded-t-[28px]">
+                        <div className="flex items-center gap-2">
+                          <Bus size={16} className="text-morandi-blue animate-pulse" />
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-300 font-mono">
+                            BOARDING TICKET / 乘車票券
+                          </span>
+                        </div>
+                        {isCurrentSpot && (
+                          <span className="bg-morandi-blue text-white text-[9px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-sm font-sans">
+                            <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping shrink-0" />
+                            當前行程關聯性
+                          </span>
+                        )}
                       </div>
-                      <div className="flex-1 space-y-3">
-                        <div className="space-y-1">
-                          <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">TRANSPORT NAME</p>
+
+                      {/* Ticket Body with notch cuts on sides */}
+                      <div className="p-6 relative space-y-4">
+                        {/* Semi-circle punch-out notches on sides */}
+                        <div className="absolute top-1/2 -translate-y-1/2 -left-3 w-6 h-6 bg-white border-r border-dashed border-slate-100 rounded-full z-10 hidden md:block" />
+                        <div className="absolute top-1/2 -translate-y-1/2 -right-3 w-6 h-6 bg-white border-l border-dashed border-slate-100 rounded-full z-10 hidden md:block" />
+                        
+                        {/* Transport Name Field */}
+                        <div className="space-y-1.5">
+                          <label className="text-[8px] text-morandi-ash font-black uppercase tracking-wider block">
+                            TRANSPORT NAME / 交通工具或項目
+                          </label>
                           <input 
-                            className="w-full bg-transparent border-none font-black text-lg text-morandi-clay focus:outline-none"
-                            placeholder="交通名稱"
+                            className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-slate-50 transition-colors rounded-xl px-3 py-2 text-base font-black text-morandi-clay focus:outline-none border border-transparent focus:border-slate-100"
+                            placeholder="例如：JR Haruka 特急、新幹線、地鐵"
                             value={order.name}
                             onChange={e => {
                               const newName = e.target.value;
@@ -3898,14 +4665,18 @@ function SpotEditModal({
                             }}
                           />
                         </div>
-                        
+
+                        {/* Dual Grid Fields: Departure Time & Location */}
                         <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1">
-                            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">DEPARTURE TIME</p>
-                            <div className="flex items-center gap-2 text-morandi-ash/60">
-                              <Clock size={14} />
+                          <div className="space-y-1.5">
+                            <label className="text-[8px] text-morandi-ash font-black uppercase tracking-wider block">
+                              DEPARTURE TIME / 出發時間
+                            </label>
+                            <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 focus-within:bg-white transition-all">
+                              <Clock size={12} className="text-morandi-ash shrink-0" />
                               <input 
                                 className="w-full bg-transparent border-none font-bold text-morandi-clay focus:outline-none text-xs"
+                                placeholder="10:00"
                                 value={order.time || ''}
                                 onChange={e => setData(prev => ({
                                   ...prev,
@@ -3914,12 +4685,16 @@ function SpotEditModal({
                               />
                             </div>
                           </div>
-                          <div className="space-y-1">
-                            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">LOCATION</p>
-                            <div className="flex items-center gap-2 text-morandi-ash/60">
-                              <MapPin size={14} />
+
+                          <div className="space-y-1.5">
+                            <label className="text-[8px] text-morandi-ash font-black uppercase tracking-wider block">
+                              STATION /搭乘處
+                            </label>
+                            <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 focus-within:bg-white transition-all">
+                              <MapPin size={12} className="text-morandi-ash shrink-0" />
                               <input 
                                 className="w-full bg-transparent border-none font-bold text-morandi-clay focus:outline-none text-xs"
+                                placeholder="例如：關西機場第一航廈"
                                 value={order.location || ''}
                                 onChange={e => setData(prev => ({
                                   ...prev,
@@ -3930,14 +4705,17 @@ function SpotEditModal({
                           </div>
                         </div>
 
-                        <div className="space-y-3 pt-2">
-                          <div className="space-y-1">
-                            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">TICKET LINK / URL</p>
-                            <div className="flex items-center gap-2 bg-morandi-mist rounded-xl px-3 py-2">
-                              <Link size={14} className="text-morandi-ash" />
+                        {/* Ticket URL Link */}
+                        <div className="space-y-1.5">
+                          <label className="text-[8px] text-morandi-ash font-black uppercase tracking-wider block">
+                            TICKET LINK & ACCESS / 預約與票券官網連結
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 border border-slate-100 focus-within:border-morandi-blue/30 focus-within:bg-white transition-all overflow-hidden">
+                              <Link size={12} className="text-morandi-ash shrink-0 animate-pulse" />
                               <input 
                                 className="w-full bg-transparent border-none text-xs font-bold text-morandi-clay focus:outline-none"
-                                placeholder="票卷連結..."
+                                placeholder="填寫票券預約連結網址 (URL)..."
                                 value={order.url || ''}
                                 onChange={e => setData(prev => ({
                                   ...prev,
@@ -3945,44 +4723,133 @@ function SpotEditModal({
                                 }))}
                               />
                             </div>
+                            {order.url && (
+                              <a 
+                                href={order.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-morandi-clay text-white rounded-xl flex items-center justify-center shrink-0 h-9 w-9 shadow-sm hover:bg-slate-800 transition-colors border border-slate-100"
+                                title="點此跳轉到預約頁面"
+                              >
+                                <ExternalLink size={14} />
+                              </a>
+                            )}
                           </div>
-                          <div className="space-y-1">
-                            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">REMARKS</p>
-                            <textarea 
-                              className="w-full bg-morandi-mist border-none rounded-xl p-3 text-xs font-bold text-morandi-clay focus:outline-none min-h-[60px] resize-none"
-                              placeholder="交通備註..."
-                              value={order.remarks || ''}
-                              onChange={e => setData(prev => ({
-                                ...prev,
-                                transportOrders: prev.transportOrders.map(o => o.id === order.id ? { ...o, remarks: e.target.value } : o)
-                              }))}
-                            />
+                        </div>
+
+                        {/* Dashed divider */}
+                        <div className="border-t border-dashed border-slate-200 my-1" />
+
+                        {/* Remarks Memo block */}
+                        <div className="space-y-1.5">
+                          <label className="text-[8px] text-morandi-ash font-black uppercase tracking-wider block">
+                            MEMO & NOTES / 搭乘與行程備註
+                          </label>
+                          <textarea 
+                            className="w-full bg-slate-50 border border-transparent focus:border-slate-100 rounded-xl p-3 text-xs font-semibold text-morandi-clay focus:outline-none min-h-[70px] resize-none leading-relaxed focus:bg-white transition-all"
+                            placeholder="請在此輸入月台編號、轉乘注意事項、座位或預約代碼等備註..."
+                            value={order.remarks || ''}
+                            onChange={e => setData(prev => ({
+                              ...prev,
+                              transportOrders: prev.transportOrders.map(o => o.id === order.id ? { ...o, remarks: e.target.value } : o)
+                            }))}
+                          />
+                        </div>
+
+                        {/* Attachment Photos & QR codes */}
+                        <div className="space-y-2">
+                          <label className="text-[8px] text-morandi-ash font-black uppercase tracking-wider block">
+                            ATTACHMENTS / 實體車票截圖與 QR Code
+                          </label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(order.images || []).map((img, idx) => (
+                              <div key={idx} className="aspect-square bg-slate-100 rounded-xl overflow-hidden relative group border border-slate-100">
+                                <img src={img} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    const newList = [...(order.images || [])];
+                                    newList.splice(idx, 1);
+                                    setData(prev => ({
+                                      ...prev,
+                                      transportOrders: prev.transportOrders.map(o => o.id === order.id ? { ...o, images: newList } : o)
+                                    }));
+                                  }}
+                                  className="absolute top-1 right-1 w-5 h-5 bg-white/90 hover:bg-white rounded-full flex items-center justify-center text-red-500 transition-colors shadow-xs"
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                              </div>
+                            ))}
+                            <div className="aspect-square bg-slate-50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 overflow-hidden relative cursor-pointer hover:bg-slate-100 transition-colors">
+                              <Plus size={16} className="text-slate-400 mb-0.5" />
+                              <span className="text-[8px] font-black">上傳票券</span>
+                              <input 
+                                type="file" 
+                                accept="image/*"
+                                multiple
+                                className="absolute inset-0 opacity-0 cursor-pointer"
+                                onChange={e => {
+                                  const files = Array.from(e.target.files || []);
+                                  files.forEach(file => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => {
+                                      const currentImages = order.images || [];
+                                      setData(prev => ({
+                                        ...prev,
+                                        transportOrders: prev.transportOrders.map(o => o.id === order.id ? { ...o, images: [...currentImages, reader.result as string] } : o)
+                                      }));
+                                    };
+                                    reader.readAsDataURL(file);
+                                  });
+                                }}
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
 
           {localSpot.category === 'hotel' && (
             <div className="space-y-6">
-              <SectionTitle icon={Bed} title="住宿資訊" />
-              <div className="grid grid-cols-1 gap-4">
-                {data.hotels.map(hotel => (
-                  <div key={hotel.id} className="bg-white p-6 rounded-[32px] border border-morandi-sand/20 shadow-sm group relative">
-                    <div className="flex gap-4">
-                      <div className="bg-morandi-clay/10 w-12 h-12 rounded-2xl flex-none flex items-center justify-center text-morandi-clay transition-colors">
-                        <Bed size={24} />
+              <SectionTitle icon={Bed} title="住宿明細憑證 (STAY VOUCHER)" />
+              <div className="grid grid-cols-1 gap-6">
+                {data.hotels.map((hotel, hIdx) => {
+                  const isCurrentStay = hotel.name.trim().toLowerCase() === localSpot.location.trim().toLowerCase();
+                  return (
+                    <div 
+                      key={hotel.id} 
+                      className={`relative overflow-hidden bg-white rounded-[32px] border ${
+                        isCurrentStay ? 'border-morandi-clay/40 shadow-md ring-1 ring-morandi-clay/10' : 'border-morandi-sand/30 shadow-sm'
+                      } hover:shadow-md transition-all duration-300`}
+                    >
+                      {/* Top Ribbon & Header section */}
+                      <div className="bg-gradient-to-r from-morandi-clay/5 to-morandi-sand/15 px-6 py-4 flex items-center justify-between border-b border-morandi-sand/15">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-morandi-clay animate-pulse" />
+                          <p className="text-[10px] text-morandi-clay font-black tracking-widest uppercase">Stay Option {hIdx + 1}</p>
+                        </div>
+                        {isCurrentStay && (
+                          <span className="bg-morandi-sage text-white text-[9px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-sm">
+                            ✨ 當前行程入住飯店
+                          </span>
+                        )}
                       </div>
-                      <div className="flex-1 space-y-3">
-                        <div className="space-y-1">
-                          <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">HOTEL NAME</p>
+
+                      <div className="p-6 space-y-4">
+                        {/* Hotel Name Field */}
+                        <div className="space-y-1.5">
+                          <p className="text-[9px] text-morandi-ash font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+                            <Bed size={12} className="text-morandi-clay" /> HOTEL NAME / 飯店名稱
+                          </p>
                           <input 
-                            className="w-full bg-transparent border-none font-black text-lg text-morandi-clay focus:outline-none"
-                            placeholder="飯店名稱"
+                            className="w-full bg-morandi-mist/40 border border-morandi-sand/20 hover:border-morandi-clay/20 focus:border-morandi-clay/50 rounded-2xl px-4 py-2.5 font-black text-base text-morandi-clay focus:outline-none focus:ring-1 focus:ring-morandi-clay/20 transition-all"
+                            placeholder="請填入飯店名稱..."
                             value={hotel.name}
                             onChange={e => {
                               const newName = e.target.value;
@@ -3998,13 +4865,78 @@ function SpotEditModal({
                             }}
                           />
                         </div>
-                        <div className="space-y-1">
-                          <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">ADDRESS</p>
-                          <div className="flex items-center gap-2 text-morandi-ash/60">
-                            <MapPin size={14} />
+
+                        {/* Interactive Dotted Ticket punch dividers */}
+                        <div className="relative py-2">
+                          <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-morandi-sand/40" />
+                          <div className="absolute -left-[30px] top-1/2 -translate-y-1/2 w-6 h-6 bg-[#fcfbfa] border-r border-[#ecebe9] rounded-full" />
+                          <div className="absolute -right-[30px] top-1/2 -translate-y-1/2 w-6 h-6 bg-[#fcfbfa] border-l border-[#ecebe9] rounded-full" />
+                        </div>
+
+                        {/* Middle grid section for Stay Schedule */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-morandi-mist/10 p-3.5 rounded-2xl border border-morandi-sand/15 hover:border-morandi-sand/35 transition-all">
+                            <p className="text-[9px] text-morandi-ash font-bold uppercase tracking-widest flex items-center gap-1 mb-1">
+                              📅 CHECK IN / 入住日期
+                            </p>
                             <input 
-                              className="w-full bg-transparent border-none font-medium text-morandi-ash focus:outline-none text-xs"
-                              placeholder="飯店地址"
+                              type="text"
+                              className="w-full bg-transparent border-none font-bold text-xs text-morandi-clay focus:outline-none"
+                              value={hotel.checkIn}
+                              onChange={e => setData(prev => ({
+                                ...prev,
+                                hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, checkIn: e.target.value } : h)
+                              }))}
+                              placeholder="YYYY-MM-DD"
+                            />
+                          </div>
+
+                          <div className="bg-morandi-mist/10 p-3.5 rounded-2xl border border-morandi-sand/15 hover:border-morandi-sand/35 transition-all">
+                            <p className="text-[9px] text-morandi-ash font-bold uppercase tracking-widest flex items-center gap-1 mb-1">
+                              📅 CHECK OUT / 退房日期
+                            </p>
+                            <input 
+                              type="text"
+                              className="w-full bg-transparent border-none font-bold text-xs text-morandi-clay focus:outline-none"
+                              value={hotel.checkOut}
+                              onChange={e => setData(prev => ({
+                                ...prev,
+                                hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, checkOut: e.target.value } : h)
+                              }))}
+                              placeholder="YYYY-MM-DD"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Interactive Dotted Ticket punch dividers 2 */}
+                        <div className="relative py-2">
+                          <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-morandi-sand/40" />
+                          <div className="absolute -left-[30px] top-1/2 -translate-y-1/2 w-6 h-6 bg-[#fcfbfa] border-r border-[#ecebe9] rounded-full" />
+                          <div className="absolute -right-[30px] top-1/2 -translate-y-1/2 w-6 h-6 bg-[#fcfbfa] border-l border-[#ecebe9] rounded-full" />
+                        </div>
+
+                        {/* Bottom fields: Address & Phone */}
+                        <div className="space-y-3.5">
+                          {/* Hotel Address */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-[9px] text-morandi-ash font-extrabold uppercase tracking-widest">
+                              <span className="flex items-center gap-1.5">
+                                <MapPin size={12} className="text-morandi-clay" /> ADDRESS / 飯店地址
+                              </span>
+                              {hotel.address && (
+                                <a 
+                                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hotel.address)}`} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-[9px] text-morandi-clay hover:underline flex items-center gap-1 font-bold pointer-events-auto"
+                                >
+                                  打開 Google 地圖 <ExternalLink size={10} />
+                                </a>
+                              )}
+                            </div>
+                            <input 
+                              className="w-full bg-morandi-mist/40 border border-morandi-sand/20 hover:border-morandi-clay/20 focus:border-morandi-clay/50 rounded-2xl px-4 py-2 text-xs text-morandi-clay font-medium focus:outline-none"
+                              placeholder="請填入地址..."
                               value={hotel.address || ''}
                               onChange={e => setData(prev => ({
                                 ...prev,
@@ -4012,35 +4944,51 @@ function SpotEditModal({
                               }))}
                             />
                           </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 pt-2">
-                          <div className="space-y-1">
-                            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">CHECK IN</p>
-                            <input 
-                              className="w-full bg-morandi-mist border-none rounded-xl p-2 text-[10px] font-bold text-morandi-clay focus:outline-none"
-                              value={hotel.checkIn}
-                              onChange={e => setData(prev => ({
-                                ...prev,
-                                hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, checkIn: e.target.value } : h)
-                              }))}
-                            />
+
+                          {/* Extra info fields like Phone & Remarks */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <p className="text-[9px] text-morandi-ash font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+                                <Phone size={12} className="text-morandi-clay" /> TELEPHONE / 聯絡電話
+                              </p>
+                              <input 
+                                className="w-full bg-morandi-mist/40 border border-morandi-sand/20 hover:border-morandi-clay/20 focus:border-morandi-clay/50 rounded-2xl px-4 py-2 text-xs text-morandi-clay font-medium focus:outline-none"
+                                placeholder="未填寫聯絡電話 (可供編輯)"
+                                value={hotel.phone || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setData(prev => ({
+                                    ...prev,
+                                    hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, phone: val } : h)
+                                  }));
+                                }}
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <p className="text-[9px] text-morandi-ash font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+                                <Info size={12} className="text-morandi-clay" /> REMARKS / 預訂備註
+                              </p>
+                              <input 
+                                className="w-full bg-morandi-mist/40 border border-morandi-sand/20 hover:border-morandi-clay/20 focus:border-morandi-clay/50 rounded-2xl px-4 py-2 text-xs text-morandi-clay font-medium focus:outline-none"
+                                placeholder="如房型、早餐、確認代號等..."
+                                value={hotel.remarks || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setData(prev => ({
+                                    ...prev,
+                                    hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, remarks: val } : h)
+                                  }));
+                                }}
+                              />
+                            </div>
                           </div>
-                          <div className="space-y-1">
-                            <p className="text-[8px] text-morandi-ash font-bold uppercase tracking-widest">CHECK OUT</p>
-                            <input 
-                              className="w-full bg-morandi-mist border-none rounded-xl p-2 text-[10px] font-bold text-morandi-clay focus:outline-none"
-                              value={hotel.checkOut}
-                              onChange={e => setData(prev => ({
-                                ...prev,
-                                hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, checkOut: e.target.value } : h)
-                              }))}
-                            />
-                          </div>
                         </div>
+
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
