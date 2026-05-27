@@ -100,6 +100,7 @@ export interface FlightInfo {
 export interface HotelInfo {
   id: string;
   name: string;
+  nameEn?: string;
   address: string;
   phone?: string;
   navUrl?: string;
