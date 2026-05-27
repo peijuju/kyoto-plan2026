@@ -51,7 +51,8 @@ import {
   BookOpen,
   Hourglass,
   ArrowDown,
-  ShieldAlert
+  ShieldAlert,
+  Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -91,11 +92,21 @@ import {
 
 // Helper function to lazily initialize Gemini client and check for API key
 const getAiInstance = (): GoogleGenAI => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  let apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'undefined' || apiKey === 'null' || apiKey === '') {
-    throw new Error('未設定 Gemini API 金鑰。因 GitHub Pages 為公開靜態網頁，並未包含您的私密金鑰，如常需使用 AI，請在專案中設定或確保環境變數已注入。');
+    apiKey = localStorage.getItem('gemini_api_key') || '';
   }
-  return new GoogleGenAI({ apiKey });
+  if (!apiKey || apiKey === 'undefined' || apiKey === 'null' || apiKey === '') {
+    throw new Error('未設定 Gemini API 金鑰。因 GitHub Pages 為公開靜態網頁，並未包含您的私密金鑰，如常需使用 AI，請點擊右上角設定 API 金鑰，或確保環境變數已注入。');
+  }
+  return new GoogleGenAI({ 
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
 };
 
 // Robust helper to parse arbitrary date formats into a comparable timestamp
@@ -709,6 +720,24 @@ export default function App() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [showExpenseChartModal, setShowExpenseChartModal] = useState(false);
   const [expenseCurrency, setExpenseCurrency] = useState<'JPY' | 'TWD'>('JPY');
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState('');
+  const [customApiKey, setCustomApiKey] = useState(() => {
+    return localStorage.getItem('gemini_api_key') || '';
+  });
+
+  const checkAndPromptApiKey = (): boolean => {
+    let apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'undefined' || apiKey === 'null' || apiKey === '') {
+      apiKey = localStorage.getItem('gemini_api_key') || '';
+    }
+    if (!apiKey || apiKey === 'undefined' || apiKey === 'null' || apiKey === '') {
+      setTempApiKey('');
+      setShowApiKeyModal(true);
+      return false;
+    }
+    return true;
+  };
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [generatingSpotId, setGeneratingSpotId] = useState<string | null>(null);
   const [currentTripId, setCurrentTripId] = useState<string | null>(localStorage.getItem('currentTripId'));
@@ -1033,6 +1062,8 @@ export default function App() {
     const spot = day?.spots.find(s => s.id === spotId);
     if (!spot || generatingSpotId) return;
 
+    if (!checkAndPromptApiKey()) return;
+
     setGeneratingSpotId(spotId);
     try {
       let categoryPrompt = '';
@@ -1165,6 +1196,8 @@ export default function App() {
     const day = data.days.find(d => d.id === dayId);
     if (!day || isGenerating) return;
 
+    if (!checkAndPromptApiKey()) return;
+
     setIsGenerating(true);
     try {
       const prompt = `你是一位專業的日本導遊。請分析以下行程，並為每個景點提供簡短的故事、攻略、必吃美食、必點菜單、必買伴手禮。
@@ -1291,6 +1324,18 @@ export default function App() {
   return (
     <div className="min-h-screen bg-morandi-mist/20">
       <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl relative overflow-x-hidden flex flex-col pb-28">
+        {/* Floating API Key Config Button */}
+        <button
+          onClick={() => {
+            setTempApiKey(localStorage.getItem('gemini_api_key') || '');
+            setShowApiKeyModal(true);
+          }}
+          className="absolute top-4 right-4 w-9 h-9 bg-white/95 hover:bg-white border border-morandi-sand/30 rounded-xl flex items-center justify-center text-morandi-clay hover:text-morandi-sage shadow-sm transition-all z-50 hover:scale-105 active:scale-95 duration-200"
+          title="設定 Gemini API 金鑰"
+        >
+          <Key size={16} />
+        </button>
+
         {/* Travel Theme (Scrolls) */}
         <header className="p-6 pt-6 text-center space-y-2 bg-transparent">
         <div className="flex flex-col items-center justify-center">
@@ -1764,6 +1809,14 @@ export default function App() {
                             className="w-full bg-white border border-slate-200/60 text-center text-xs font-bold p-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-slate-400"
                             value={shareInputId}
                             onChange={e => setShareInputId(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (shareInputId.trim()) {
+                                  handleJoinTrip(shareInputId.trim().toUpperCase());
+                                }
+                              }
+                            }}
                           />
                           <button 
                             type="submit"
@@ -3032,6 +3085,111 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Gemini API Key Configuration Modal */}
+      <AnimatePresence>
+        {showApiKeyModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-5">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowApiKeyModal(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-[340px] rounded-[32px] p-6 shadow-2xl relative z-10 space-y-6 border border-morandi-sand/20"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <Key size={18} className="text-morandi-sage" />
+                  <span>設定 Gemini API 金鑰</span>
+                </h3>
+                <button onClick={() => setShowApiKeyModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs text-slate-600 leading-relaxed">
+                <p>
+                  因 <strong>GitHub Pages</strong> 為公開靜態網頁，無法包含您的私密金鑰。
+                </p>
+                <p>
+                  若您希望在此網站直接使用 <strong>AI 智慧攻略</strong> 與 
+                  <strong> 景點詳細解析</strong>，您可以在下方填入您本人的 Gemini API 金鑰。
+                </p>
+                <div className="bg-[#fcfbfa] p-4 rounded-2xl border border-dashed border-morandi-sand/30 text-[10px] space-y-1 text-slate-500">
+                  <div className="text-morandi-clay font-bold">🔒 隱私與安全保證：</div>
+                  <div>此金鑰僅會保存在您的本機瀏覽器 LocalStorage 中，API 請求直接發送至 Google 官方 API，絕不上傳到任何第三方伺服器，安全且隱私。</div>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">您的 Gemini API 金鑰 (API Key)</label>
+                  <input 
+                    type="password" 
+                    placeholder={process.env.GEMINI_API_KEY ? "已檢測到系統預設金鑰 (可不填)" : "AIzaSy... (請貼上您的金鑰)"}
+                    className="w-full bg-slate-50 border border-slate-200 p-3 px-4 rounded-2xl text-xs focus:outline-none focus:ring-1 focus:ring-morandi-sage focus:bg-white transition-all text-slate-800 font-mono"
+                    value={tempApiKey}
+                    onChange={e => setTempApiKey(e.target.value)}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <a 
+                    href="https://aistudio.google.com/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-fuji-blue hover:underline font-bold flex items-center gap-1"
+                  >
+                    <ExternalLink size={12} /> 獲取免費的 Gemini API 金鑰
+                  </a>
+                  {localStorage.getItem('gemini_api_key') && (
+                    <button 
+                      onClick={() => {
+                        localStorage.removeItem('gemini_api_key');
+                        setCustomApiKey('');
+                        setTempApiKey('');
+                        alert('金鑰已清除');
+                      }}
+                      className="text-[11px] text-red-500 hover:text-red-700 font-bold"
+                    >
+                      清除目前金鑰
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  onClick={() => setShowApiKeyModal(false)}
+                  className="flex-1 bg-slate-50 border border-slate-200 text-slate-600 py-3 rounded-2xl font-bold text-xs hover:bg-slate-100 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    if (tempApiKey.trim()) {
+                      localStorage.setItem('gemini_api_key', tempApiKey.trim());
+                      setCustomApiKey(tempApiKey.trim());
+                      setShowApiKeyModal(false);
+                      alert('金鑰設定成功！現在可以使用 AI 攻略功能。');
+                    } else {
+                      alert('請輸入有效的 Gemini API 金鑰。');
+                    }
+                  }}
+                  className="flex-1 bg-morandi-clay text-white py-3 rounded-2xl font-bold text-xs shadow-md hover:opacity-90 transition-all font-semibold"
+                >
+                  儲存並啟用
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showSpotModal && selectedSpot && (
           <SpotEditModal 
