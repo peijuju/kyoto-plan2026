@@ -187,6 +187,12 @@ const getCityWeatherConfig = (city: string) => {
         en: 'Osaka City',
         url: 'https://tenki.jp/forecast/6/30/6200/27100/'
       };
+    case '奈良市':
+      return {
+        ja: '奈良市',
+        en: 'Nara City',
+        url: 'https://tenki.jp/forecast/6/31/6410/29201/'
+      };
     case '泉佐野市':
       return {
         ja: '泉佐野市',
@@ -664,6 +670,16 @@ export default function App() {
           mergedData.days = INITIAL_DATA.days;
         }
 
+        // Programmatically correct Day 2's city to '京都市' in saved data
+        if (mergedData.days) {
+          mergedData.days = mergedData.days.map((d: any) => {
+            if (d.id === 'day2') {
+              return { ...d, city: '京都市' };
+            }
+            return d;
+          });
+        }
+
         return mergedData;
       } catch (e) {
         console.error("Failed to parse saved data:", e);
@@ -696,6 +712,7 @@ export default function App() {
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [generatingSpotId, setGeneratingSpotId] = useState<string | null>(null);
   const [currentTripId, setCurrentTripId] = useState<string | null>(localStorage.getItem('currentTripId'));
+  const [shareInputId, setShareInputId] = useState('');
 
   const { user, signIn, logout, syncExpenses, updateExpense: syncUpdateExpense, deleteExpense: syncDeleteExpense, createTrip, joinTrip, listenToTripData, updateTrip, listenToTrip } = useFirebase();
 
@@ -783,6 +800,16 @@ export default function App() {
 
         const remoteData = tripDoc.data as ItineraryData;
         if (!remoteData) return;
+
+        // Ensure Day 2 is corrected in remote data
+        if (remoteData.days) {
+          remoteData.days = remoteData.days.map((d: any) => {
+            if (d.id === 'day2') {
+              return { ...d, city: '京都市' };
+            }
+            return d;
+          });
+        }
 
         // Normalize / remove expenses from comparison
         const cleanRemote = { ...remoteData, expenses: [] };
@@ -1475,8 +1502,32 @@ export default function App() {
                             <div className="flex items-center gap-4">
                               <Sun className="text-orange-400 animate-pulse" size={32} />
                               <div>
-                                <h4 className="text-xl font-black text-morandi-clay leading-tight">{cityConfig.ja}</h4>
-                                <p className="text-[11px] font-bold text-morandi-ash uppercase tracking-widest">{cityConfig.en} · tenki.jp天氣</p>
+                                <div className="flex items-center gap-1">
+                                  <select
+                                    value={currentDay?.city || '京都市'}
+                                    onChange={e => {
+                                      const newCity = e.target.value;
+                                      setData(prev => ({
+                                        ...prev,
+                                        days: prev.days.map(d => d.id === selectedDayId ? { ...d, city: newCity } : d)
+                                      }));
+                                    }}
+                                    className="bg-transparent border-none font-black text-xl text-morandi-clay focus:outline-none cursor-pointer hover:opacity-85 py-0.5 leading-tight select-none pr-5 appearance-none focus:ring-0"
+                                    style={{
+                                      backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238c8273' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+                                      backgroundRepeat: 'no-repeat',
+                                      backgroundPosition: 'right center',
+                                      backgroundSize: '12px'
+                                    }}
+                                  >
+                                    <option value="京都市" className="text-slate-800 bg-white font-sans text-xs font-semibold">京都市</option>
+                                    <option value="宇治市" className="text-slate-800 bg-white font-sans text-xs font-semibold">宇治市</option>
+                                    <option value="大阪市" className="text-slate-800 bg-white font-sans text-xs font-semibold">大阪市</option>
+                                    <option value="奈良市" className="text-slate-800 bg-white font-sans text-xs font-semibold">奈良市</option>
+                                    <option value="泉佐野市" className="text-slate-800 bg-white font-sans text-xs font-semibold">泉佐野市</option>
+                                  </select>
+                                </div>
+                                <p className="text-[11px] font-bold text-morandi-ash uppercase tracking-widest leading-none mt-1">{cityConfig.en} · tenki.jp天氣 (點擊切換)</p>
                               </div>
                             </div>
                             
@@ -1698,17 +1749,30 @@ export default function App() {
                           <Share2 size={20} className="text-kyoto-gold" />
                           建立共享
                         </button>
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col items-center gap-2">
+                        <form 
+                          onSubmit={e => {
+                            e.preventDefault();
+                            if (shareInputId.trim()) {
+                              handleJoinTrip(shareInputId.trim().toUpperCase());
+                            }
+                          }}
+                          className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 flex flex-col items-center justify-between gap-2"
+                        >
                           <input 
                             type="text" 
                             placeholder="輸入共享 ID"
-                            className="w-full bg-white border-none text-center text-xs font-bold p-2 rounded-lg focus:outline-none"
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') handleJoinTrip(e.currentTarget.value.trim().toUpperCase());
-                            }}
+                            className="w-full bg-white border border-slate-200/60 text-center text-xs font-bold p-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-slate-400"
+                            value={shareInputId}
+                            onChange={e => setShareInputId(e.target.value)}
                           />
-                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">按 Enter 加入</p>
-                        </div>
+                          <button 
+                            type="submit"
+                            disabled={!shareInputId.trim()}
+                            className="w-full bg-slate-800 text-white text-[10px] font-black py-1.5 px-3 rounded-xl hover:bg-slate-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all flex items-center justify-center gap-1 shadow-sm"
+                          >
+                            加入行程
+                          </button>
+                        </form>
                       </div>
                     ) : (
                       <div className="bg-slate-800 rounded-2xl p-4 text-white">
