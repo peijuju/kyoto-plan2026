@@ -2637,6 +2637,9 @@ export default function App() {
                           </div>
                           <div className="flex-1 space-y-1">
                             <h4 className="font-black text-slate-800 text-base">{h.name}</h4>
+                            {h.nameEn && (
+                              <p className="text-xs text-slate-500 font-bold -mt-0.5">{h.nameEn}</p>
+                            )}
                             <div className="flex flex-col gap-1">
                               <a 
                                 href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.address)}`}
@@ -4035,6 +4038,16 @@ function HotelEditModal({
           </div>
 
           <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">飯店英文名稱</label>
+            <input 
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold text-slate-700 focus:outline-none"
+              placeholder="請輸入飯店英文名稱"
+              value={localHotel.nameEn || ''}
+              onChange={e => handleUpdate({ nameEn: e.target.value })}
+            />
+          </div>
+
+          <div className="space-y-2">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">飯店地址</label>
             <div className="relative">
               <MapPin size={16} className="absolute left-4 top-4 text-slate-300" />
@@ -5084,6 +5097,25 @@ function SpotEditModal({
                                 }))
                               }));
                               setLocalSpot(prev => ({ ...prev, location: newName }));
+                            }}
+                          />
+                        </div>
+
+                        {/* Hotel English Name Field */}
+                        <div className="space-y-1.5">
+                          <p className="text-[9px] text-morandi-ash font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+                            <Bed size={12} className="text-morandi-clay" /> ENGLISH HOTEL NAME / 飯店英文名稱
+                          </p>
+                          <input 
+                            className="w-full bg-morandi-mist/40 border border-morandi-sand/20 hover:border-morandi-clay/20 focus:border-morandi-clay/50 rounded-2xl px-4 py-2.5 font-black text-base text-morandi-clay focus:outline-none focus:ring-1 focus:ring-morandi-clay/20 transition-all"
+                            placeholder="請填入飯店英文名稱..."
+                            value={hotel.nameEn || ''}
+                            onChange={e => {
+                              const newNameEn = e.target.value;
+                              setData(prev => ({
+                                ...prev,
+                                hotels: prev.hotels.map(h => h.id === hotel.id ? { ...h, nameEn: newNameEn } : h)
+                              }));
                             }}
                           />
                         </div>
