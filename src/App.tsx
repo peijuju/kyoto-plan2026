@@ -334,8 +334,6 @@ const INITIAL_DATA: ItineraryData = {
   shoppingList: [
     { id: 'shop1', name: 'Chiikawa 娃娃 (京都限定)', remarks: '京都高島屋 S.C. (T8)', completed: false },
     { id: 'shop2', name: '岡崎神社兔子御守', remarks: '求好運', completed: false },
-    { id: 'shop3', name: '三木雞卵玉子燒', remarks: '錦市場', completed: false },
-    { id: 'shop4', name: '兔子籤', remarks: '宇治神社', completed: false },
   ],
   packingList: [
     { id: 'p1', name: '護照', quantity: 1, category: 'carry-on', completed: true },
@@ -1506,17 +1504,6 @@ export default function App() {
                     {monthNum}/{dayNum}
                   </span>
                 </button>
-                
-                {/* Delete Day Button */}
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteDay(day.id);
-                  }}
-                  className="absolute -top-1 -right-1 w-5 h-5 bg-red-50 text-red-400 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-red-100"
-                >
-                  <X size={12} />
-                </button>
               </div>
             );
           })}
@@ -1572,7 +1559,7 @@ export default function App() {
                                     <option value="泉佐野市" className="text-slate-800 bg-white font-sans text-xs font-semibold">泉佐野市</option>
                                   </select>
                                 </div>
-                                <p className="text-[11px] font-bold text-morandi-ash uppercase tracking-widest leading-none mt-1">{cityConfig.en} · tenki.jp天氣 (點擊切換)</p>
+                                <p className="text-[11px] font-bold text-morandi-ash uppercase tracking-widest leading-none mt-1">{cityConfig.en} · tenki.jp天氣</p>
                               </div>
                             </div>
                             
